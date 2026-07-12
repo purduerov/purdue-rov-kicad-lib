@@ -6,29 +6,56 @@ This repository contains the unified, team-wide source of truth for symbols, foo
 
 ```
 purdue-rov-kicad-lib/
+├── 3D_Models/                    # 3D models (.step/.wrl) for footprints
+│   └── <model-name>.step         # STEP/WRL file (e.g., XT60-M.step)
+├── Design_Blocks/                # Reusable sub-circuits (e.g. buck converters)
+├── Footprints/
+│   └── rov_parts.pretty/         # Central Footprint Library folder (required `.pretty` suffix)
+│       └── *.kicad_mod           # Individual footprint files
 ├── Symbols/
 │   └── rov_parts.kicad_sym       # Central Symbol Library file
-├── Footprints/
-│   └── rov_parts.pretty/         # Central Footprint Library directory
-│       └── *.kicad_mod           # Individual Footprints
-├── 3D_Models/                    # 3D models (.step/.wrl) for footprints
-│   └── Component.step            # STEP file
-└── Design_Blocks/                # Reusable sub-circuits (e.g. buck converters)
 ```
+
+> [!NOTE]
+> **Why the `.pretty` folder is required:** KiCad treats footprint libraries as folders, not single aggregated files (unlike symbols which are stored in a single `.kicad_sym` file). The individual footprint files (`.kicad_mod`) must live inside a directory ending with a `.pretty` suffix. KiCad's library parser strictly requires this extension to recognize the directory as a valid footprint library.
 
 ## Integration into KiCad Project
 
-To use this library in your KiCad project, it must be cloned inside your project's root folder and registered in KiCad.
+To use this library in your KiCad project, it should be integrated into your project's root folder and registered in KiCad.
 
-### 1. Clone the Library
-Navigate to the root directory of your KiCad project in a terminal, and clone this repository:
+### 1. Clone the Library (Recommended: Git Submodule)
+Cloning a repository inside another repository creates an untracked nested repo, which can lead to accidental commits or missing files. To avoid this, add this library as a Git Submodule from the root directory of your KiCad project:
+
 ```bash
-git clone https://github.com/purdue-rov/purdue-rov-kicad-lib.git
+git submodule add https://github.com/purdue-rov/purdue-rov-kicad-lib.git
 ```
-This will place the library folder (`purdue-rov-kicad-lib`) directly in your KiCad project root.
+This tracks the library under version control and places the folder (`purdue-rov-kicad-lib`) directly in your KiCad project root.
 
 ### 2. Configure Symbol & Footprint Libraries
-You must register the library paths in KiCad as **Project Specific Libraries** so that they are portable and load correctly for all team members.
+There are two ways to register the libraries in KiCad: the automated configuration (recommended) or manual configuration.
+
+#### Option A: Automated Configuration (Recommended)
+KiCad project-specific libraries are managed via `sym-lib-table` (for symbols) and `fp-lib-table` (for footprints) files in your project's root directory. 
+
+You can automate library registration for the entire team by committing these files to your KiCad project repository with the following entries:
+
+**`sym-lib-table`**
+```lisp
+(sym_lib_table
+  (lib (name "rov_parts")(type "KiCad")(uri "${KIPRJMOD}/purdue-rov-kicad-lib/Symbols/rov_parts.kicad_sym")(options "")(descr ""))
+)
+```
+
+**`fp-lib-table`**
+```lisp
+(fp_lib_table
+  (lib (name "rov_parts")(type "KiCad")(uri "${KIPRJMOD}/purdue-rov-kicad-lib/Footprints/rov_parts.pretty")(options "")(descr ""))
+)
+```
+*Note: If these files already exist in your project root, simply append the `(lib ...)` line to the existing table.*
+
+#### Option B: Manual Configuration (via KiCad GUI)
+If you prefer to configure this manually through the KiCad GUI:
 
 1. **Manage Symbol Libraries**:
    - Open your project in KiCad.
@@ -64,7 +91,7 @@ When creating or importing new symbols or footprints:
    - `DigiKey` (DigiKey Part Number / SKU)
    - `Datasheet` (URL link to the PDF datasheet)
 3. Ensure pins are matched exactly to the physical footprint.
-4. Keep 3D step models under `3D_Models/` and link them using the project-relative path variable `${KIPRJMOD}` (e.g., `${KIPRJMOD}/purdue-rov-kicad-lib/3D_Models/part.step`). Do **not** use absolute local paths.
+4. Keep 3D step models under `3D_Models/` and link them using the project-relative path variable `${KIPRJMOD}` (e.g., `${KIPRJMOD}/purdue-rov-kicad-lib/3D_Models/<model-name>.step`). Do **not** use absolute local paths.
 5. **Solder Paste & Stencil Optimization**: For ICs with large central ground pads (thermal pads) and fine-pitch components, set a custom **Solder Paste Clearance Override** in the pad settings. Divide large paste apertures into a grid of smaller apertures (50-80% coverage) to prevent parts floating or bridging during SMD reflow.
 
 
