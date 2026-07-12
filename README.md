@@ -27,7 +27,7 @@ To use this library in your KiCad project, it should be integrated into your pro
 Cloning a repository inside another repository creates an untracked nested repo, which can lead to accidental commits or missing files. To avoid this, add this library as a Git Submodule from the root directory of your KiCad project:
 
 ```bash
-git submodule add https://github.com/purdue-rov/purdue-rov-kicad-lib.git
+git submodule add git@github.com:purduerov/purdue-rov-kicad-lib.git
 ```
 This tracks the library under version control and places the folder (`purdue-rov-kicad-lib`) directly in your KiCad project root.
 
