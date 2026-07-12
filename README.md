@@ -29,7 +29,7 @@ git submodule add git@github.com:purduerov/purdue-rov-kicad-lib.git
 
 ## 2. Linking Libraries to KiCad
 
-Do **not** configure this via the KiCad GUI. To ensure portability across team members, add the library entries directly into your board's project files.
+Do **not** configure this via the KiCad GUI. To ensure portability across team members, add the library entries directly into your board's project files. The files provided are EXAMPLES of what the root directory should look like. There may be more entires, so dont rely on copy and pasting it.
 
 Open the `sym-lib-table` and `fp-lib-table` files located in the root of your board project repository and append the following S-expressions inside the main outer brackets:
 
