@@ -1,6 +1,22 @@
 # Purdue ROV Central KiCad Library
 
-Unified source of truth for symbols, footprints, 3D models, and Design Blocks.
+This repository contains the unified, team-wide source of truth for symbols, footprints, 3D models, and Design Blocks used by Purdue ROV.
+
+## Directory Structure
+
+
+
+```
+purdue-rov-kicad-lib/
+├── 3D_Models/                    # 3D models (.step/.wrl) for footprints
+│   └── <model-name>.step         # STEP/WRL file (e.g., XT60-M.step)
+├── Design_Blocks/                # Reusable sub-circuits (e.g. buck converters)
+├── Footprints/
+│   └── rov_parts.pretty/         # Central Footprint Library folder (required `.pretty` suffix)
+│       └── *.kicad_mod           # Individual footprint files
+├── Symbols/
+│   └── rov_parts.kicad_sym       # Central Symbol Library file
+```
 
 ## 1. Quick Setup (Git Submodule)
 
