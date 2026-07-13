@@ -1,0 +1,23 @@
+name: Symbol Library Validation
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  lint-symbols:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Library
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Run Symbol Library Linter
+        run: |
+          find Symbols -name "*.kicad_sym" -exec python3 scripts/linter_validator.py {} +
