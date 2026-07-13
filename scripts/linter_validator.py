@@ -19,12 +19,16 @@ def check_kicad_symbol_file(filepath):
             # Parse symbol declaration (matches: (symbol "SymbolName" ...)
             sym_match = re.search(r'\(symbol "([^"]+)"', line)
             if sym_match:
+                symbol_name = sym_match.group(1)
+                # Skip sub-symbols (units/graphic parts) which end in _[0-9]+_[0-9]+
+                if re.search(r'_[0-9]+_[0-9]+$', symbol_name):
+                    continue
                 if current_symbol:
                     # Validate previous symbol fields before starting the new one
                     for field in MANDATORY_FIELDS:
                         if field not in present_fields:
                             errors.append(f"Symbol '{current_symbol}' is missing mandatory field: {field}")
-                current_symbol = sym_match.group(1)
+                current_symbol = symbol_name
                 present_fields = set()
                 
             # Parse properties (matches: (property "PropertyName" "PropertyValue" ...)
