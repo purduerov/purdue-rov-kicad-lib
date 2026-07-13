@@ -1,0 +1,30 @@
+# KiCad temporary/backup files
+*.tmp
+*-bak
+*-back
+*.bak
+*-save
+*~
+_autosave-*
+*.kicad_prl
+*.kicad_sch-bak
+*.kicad_pcb-bak
+*.kicad_pro-bak
+
+# KiCad lock files
+*.lck
+
+# Python cache files
+__pycache__/
+*.pyc
+
+# OS/Editor files
+.DS_Store
+Thumbs.db
+
+# Foreign CAD library files (Altium, etc. committed by mistake)
+*.PcbLib
+*.PcbDoc
+*.SchDoc
+*.LibPkg
+*.PrjPcb
