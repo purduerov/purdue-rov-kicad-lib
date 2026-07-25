@@ -1,3 +1,8 @@
 (fp_lib_table
-  (lib (name "rov_parts")(type "KiCad")(uri "${KIPRJMOD}/purdue-rov-kicad-lib/Footprints/rov_parts.pretty")(options "")(descr ""))
+  (lib (name "rov_passives")(type "KiCad")(uri "${KICAD_PROJECT_DIR}/libs/purdue-rov-kicad-lib/Footprints/rov_passives.pretty")(options "")(descr ""))
+  (lib (name "rov_power")(type "KiCad")(uri "${KICAD_PROJECT_DIR}/libs/purdue-rov-kicad-lib/Footprints/rov_power.pretty")(options "")(descr ""))
+  (lib (name "rov_logic")(type "KiCad")(uri "${KICAD_PROJECT_DIR}/libs/purdue-rov-kicad-lib/Footprints/rov_logic.pretty")(options "")(descr ""))
+  (lib (name "rov_connectors")(type "KiCad")(uri "${KICAD_PROJECT_DIR}/libs/purdue-rov-kicad-lib/Footprints/rov_connectors.pretty")(options "")(descr ""))
+  (lib (name "rov_sensors")(type "KiCad")(uri "${KICAD_PROJECT_DIR}/libs/purdue-rov-kicad-lib/Footprints/rov_sensors.pretty")(options "")(descr ""))
+  (lib (name "rov_mech")(type "KiCad")(uri "${KICAD_PROJECT_DIR}/libs/purdue-rov-kicad-lib/Footprints/rov_mech.pretty")(options "")(descr ""))
 )

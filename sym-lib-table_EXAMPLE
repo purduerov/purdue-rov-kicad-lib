@@ -1,3 +1,8 @@
 (sym_lib_table
-  (lib (name "rov_parts")(type "KiCad")(uri "${KIPRJMOD}/purdue-rov-kicad-lib/Symbols/rov_parts.kicad_sym")(options "")(descr "Purdue ROV Central Symbols"))
+  (lib (name "rov_passives")(type "KiCad")(uri "${KICAD_PROJECT_DIR}/libs/purdue-rov-kicad-lib/Symbols/rov_passives.kicad_sym")(options "")(descr ""))
+  (lib (name "rov_power")(type "KiCad")(uri "${KICAD_PROJECT_DIR}/libs/purdue-rov-kicad-lib/Symbols/rov_power.kicad_sym")(options "")(descr ""))
+  (lib (name "rov_logic")(type "KiCad")(uri "${KICAD_PROJECT_DIR}/libs/purdue-rov-kicad-lib/Symbols/rov_logic.kicad_sym")(options "")(descr ""))
+  (lib (name "rov_connectors")(type "KiCad")(uri "${KICAD_PROJECT_DIR}/libs/purdue-rov-kicad-lib/Symbols/rov_connectors.kicad_sym")(options "")(descr ""))
+  (lib (name "rov_sensors")(type "KiCad")(uri "${KICAD_PROJECT_DIR}/libs/purdue-rov-kicad-lib/Symbols/rov_sensors.kicad_sym")(options "")(descr ""))
+  (lib (name "rov_mech")(type "KiCad")(uri "${KICAD_PROJECT_DIR}/libs/purdue-rov-kicad-lib/Symbols/rov_mech.kicad_sym")(options "")(descr ""))
 )

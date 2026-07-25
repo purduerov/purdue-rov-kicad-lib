@@ -9,10 +9,19 @@ This repository contains the unified, team-wide source of truth for symbols, foo
 ```
 purdue-rov-kicad-lib/
 ├── Symbols/
-│   └── rov_parts.kicad_sym       # Central Symbol Library file (all parts nested here)
+│   ├── rov_passives.kicad_sym    # Passives (Resistors, Capacitors, Inductors)
+│   ├── rov_power.kicad_sym       # Power (Regulators, MOSFETs, Batteries)
+│   ├── rov_logic.kicad_sym       # Logic (MCUs, ICs, OpAmps, Drivers)
+│   ├── rov_connectors.kicad_sym  # Connectors (Terminals, Headers, Plugs)
+│   ├── rov_sensors.kicad_sym     # Sensors (IMUs, Cameras, Thermistors)
+│   └── rov_mech.kicad_sym        # Mechanical (Mounting holes, standoffs)
 ├── Footprints/
-│   └── rov_parts.pretty/         # Central Footprint Library directory
-│       └── *.kicad_mod           # Individual Footprints
+│   ├── rov_passives.pretty/      # Passives footprints
+│   ├── rov_power.pretty/         # Power footprints
+│   ├── rov_logic.pretty/         # Logic footprints
+│   ├── rov_connectors.pretty/    # Connectors footprints
+│   ├── rov_sensors.pretty/       # Sensors footprints
+│   └── rov_mech.pretty/          # Mechanical footprints
 ├── 3D_Models/                    # 3D models (.step/.wrl) for footprints
 ├── Design_Blocks/                # Reusable sub-circuits (e.g. buck converters)
 └── scripts/
@@ -27,6 +36,7 @@ When creating or importing new symbols or footprints, you must adhere to the fol
 
 ### 1. Mandatory Symbol Fields
 To pass the library validator, every symbol **must** have the following custom fields populated:
+*   **`Category`**: Must be one of `Passives`, `Power`, `Logic`, `Connectors`, `Sensors`, `Mech`.
 *   **`MPN`**: Manufacturer Part Number (exact match).
 *   **`Manufacturer`**: The component's manufacturer name (e.g., `AMASS`, `Texas Instruments`).
 *   **`DigiKey`**: The DigiKey Part Number/SKU (e.g., `1528-2615-ND`).
@@ -48,7 +58,7 @@ This repository enforces quality controls automatically:
 ### 1. Local Verification
 Before committing, you can run the linter script locally to verify your symbols:
 ```bash
-python3 scripts/linter_validator.py Symbols/rov_parts.kicad_sym
+python3 scripts/linter_validator.py Symbols/*.kicad_sym
 ```
 *Note: The linter is smart and automatically skips KiCad's unit/graphic sub-symbols (e.g., `XT60-M_0_0`), only validating the top-level parent components.*
 

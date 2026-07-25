@@ -32,9 +32,9 @@ Follow these instructions exactly to create a new symbol, footprint, and 3D mode
 
 ### Step 2: Create and Link the Footprint
 1. Open KiCad's **Footprint Editor**.
-2. Select the `rov_parts` library (mapped to `libs/purdue-rov-kicad-lib/Footprints/rov_parts.pretty`).
+2. Select the appropriate categorized footprint library (`rov_passives`, `rov_power`, `rov_logic`, `rov_connectors`, `rov_sensors`, or `rov_mech`).
 3. Create your footprint. (See [Footprint Design Best Practices](#footprint-design--reflow-best-practices) below).
-4. Save the footprint inside the `rov_parts` library.
+4. Save the footprint inside the chosen library.
 
 ### Step 3: Add the 3D Model
 1. Obtain the 3D model of the part in **`.step`** format (do not use `.wrl` as STEP is required for mechanical CAD exports to SolidWorks/Onshape).
@@ -46,24 +46,25 @@ Follow these instructions exactly to create a new symbol, footprint, and 3D mode
 
 ### Step 4: Create the Symbol and Fields
 1. Open KiCad's **Symbol Editor**.
-2. Select the `rov_parts` library (mapped to `libs/purdue-rov-kicad-lib/Symbols/rov_parts.kicad_sym`).
+2. Select the appropriate categorized symbol library (`rov_passives`, `rov_power`, `rov_logic`, `rov_connectors`, `rov_sensors`, or `rov_mech`).
 3. Create your symbol. 
 4. In the symbol properties, set the **Footprint** field to:
    ```
    ROV_Footprints:[exact_footprint_name_you_saved]
    ```
-5. Add the **5 mandatory fields** as custom fields:
+5. Add the **6 mandatory fields** as custom fields:
+   *   `Category`: Must be one of `Passives`, `Power`, `Logic`, `Connectors`, `Sensors`, `Mech`. Click the `+` button in Symbol Properties to add a new custom field.
    *   `MPN`: The Manufacturer Part Number (exact matching).
    *   `Manufacturer`: The manufacturer name.
    *   `DigiKey`: The DigiKey Part Number/SKU (if none exists, use `N/A`).
    *   `Datasheet`: The direct link to the datasheet PDF (must start with `http://` or `https://` and end with `.pdf`).
    *   `Temp_Range`: The operating temperature range (e.g., `-40°C to 125°C`).
-6. Save the symbol inside `rov_parts`.
+6. Save the symbol inside the chosen library.
 
 ### Step 5: Verify Locally
 1. Run the python linter script from the library root to ensure it passes all validations:
    ```bash
-   python scripts/linter_validator.py Symbols/rov_parts.kicad_sym
+   python scripts/linter_validator.py Symbols/*.kicad_sym
    ```
 2. Verify that the output says `Validation successful!`. If there are lint errors, fix the fields in the Symbol Editor and save again.
 
@@ -74,7 +75,7 @@ Follow these instructions exactly to create a new symbol, footprint, and 3D mode
    ```
 2. Stage only the new files and library modifications:
    ```bash
-   git add Symbols/rov_parts.kicad_sym Footprints/rov_parts.pretty/[your-footprint].kicad_mod 3D_Models/[your-model].step
+   git add Symbols/*.kicad_sym Footprints/*/*.kicad_mod 3D_Models/[your-model].step
    ```
 3. Commit and push your branch:
    ```bash
@@ -104,7 +105,7 @@ Follow these instructions exactly to create a new symbol, footprint, and 3D mode
 
 ## How to Import Symbols Downloaded Online
 
-If you downloaded a symbol from Ultra Librarian, SnapEDA, or SamacSys, it will come as a standalone `.kicad_sym` file. Follow one of the methods below to merge it into the central `rov_parts.kicad_sym` file.
+If you downloaded a symbol from Ultra Librarian, SnapEDA, or SamacSys, it will come as a standalone `.kicad_sym` file. Follow one of the methods below to merge it into one of the categorized `.kicad_sym` files.
 
 ### Method A: Using the KiCad Symbol Editor (Recommended)
 1.  **Add the Downloaded File as a Temporary Library**:
@@ -117,11 +118,11 @@ If you downloaded a symbol from Ultra Librarian, SnapEDA, or SamacSys, it will c
     *   In the library panel on the left, scroll down to find `temp_download`.
     *   Expand it, right-click the symbol, and select **Copy**.
 3.  **Paste into the Central Library**:
-    *   Scroll to find the `rov_parts` library (which maps to your `purdue-rov-kicad-lib` submodule).
-    *   Right-click `rov_parts` and click **Paste Symbol**.
+    *   Scroll to find the appropriate categorized library (e.g. `rov_logic`, `rov_power`).
+    *   Right-click the chosen library and click **Paste Symbol**.
 4.  **Enrich Properties**:
-    *   Double-click the pasted symbol in `rov_parts` to open its properties.
-    *   Populate the **5 mandatory fields** (`MPN`, `Manufacturer`, `DigiKey`, `Datasheet`, `Temp_Range`) and make sure the **Footprint** field points to `ROV_Footprints:[footprint_name]`.
+    *   Double-click the pasted symbol to open its properties.
+    *   Populate the **6 mandatory fields** (`Category`, `MPN`, `Manufacturer`, `DigiKey`, `Datasheet`, `Temp_Range`) and make sure the **Footprint** field points to `ROV_Footprints:[footprint_name]`. Click the `+` button to add any missing fields.
     *   Click **Save**.
 5.  **Remove the Temporary Library**:
     *   Go back to **Preferences ➔ Manage Symbol Libraries** and remove the `temp_download` entry so your catalog stays clean.
@@ -130,9 +131,9 @@ If you downloaded a symbol from Ultra Librarian, SnapEDA, or SamacSys, it will c
 Because KiCad symbols are stored as nested text blocks inside a single file, you can merge them using any text editor:
 1.  Open the downloaded `.kicad_sym` file in your text editor (e.g. VS Code).
 2.  Locate the symbol block starting with `(symbol "PART_NAME" ...)` and select the entire block (including all its contents and matching closing parentheses). **Copy it**.
-3.  Open the central `Symbols/rov_parts.kicad_sym` file in your text editor.
+3.  Open the appropriate categorized `Symbols/rov_*.kicad_sym` file in your text editor.
 4.  Scroll to the very bottom of the file. Right before the final closing parenthesis `)` of the library, paste your copied symbol block.
-5.  Open KiCad's **Symbol Editor**, load `rov_parts`, verify the symbol loads correctly, add the 5 mandatory fields, and click **Save**.
+5.  Open KiCad's **Symbol Editor**, load the library, verify the symbol loads correctly, add the 6 mandatory fields, and click **Save**.
 
 ---
 
