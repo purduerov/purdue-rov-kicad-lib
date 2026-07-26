@@ -10,7 +10,7 @@
     (property "Value" "XT60-M" (id 1) (at 0.0 -5.08 0)
       (effects (font (size 1.27 1.27)) (justify bottom left))
     )
-    (property "Footprint" "ROV_Footprints:AMASS_XT60-M" (id 2) (at 0 0 0)
+    (property "Footprint" "rov_connectors:AMASS_XT60-M" (id 2) (at 0 0 0)
       (effects (font (size 1.27 1.27)) (justify bottom) hide)
     )
     (property "Datasheet" "https://www.tme.eu/Document/459ba40cfcc360fbc3585098ffb4d241/XT60-M.pdf" (id 3) (at 0 0 0)
