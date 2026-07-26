@@ -20,6 +20,11 @@ CATEGORIES = {
     'Mech': ['Mounting Hole', 'Heatsink', 'Hardware', 'Standoff']
 }
 
+_LOWERCASE_CATEGORIES = {
+    cat: [kw.lower() for kw in keywords]
+    for cat, keywords in CATEGORIES.items()
+}
+
 def extract_symbols(kicad_sym_content):
     lines = kicad_sym_content.split('\n')
     header_lines = []
@@ -56,9 +61,9 @@ def extract_symbols(kicad_sym_content):
 
 def determine_category(sym_content):
     text_lower = sym_content.lower()
-    for cat, keywords in CATEGORIES.items():
+    for cat, keywords in _LOWERCASE_CATEGORIES.items():
         for kw in keywords:
-            if kw.lower() in text_lower:
+            if kw in text_lower:
                 return cat
     return 'Mech'  # Default
 
