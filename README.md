@@ -49,27 +49,19 @@ To pass the library validator, every symbol **must** have the following custom f
     `${KICAD_PROJECT_DIR}/libs/purdue-rov-kicad-lib/3D_Models/part.step`
 *   **Solder Paste & Stencil Optimization**: For ICs with large central ground pads (thermal pads) and fine-pitch components, set a custom **Solder Paste Clearance Override** in the pad settings. Divide large paste apertures into a grid of smaller apertures (50-80% coverage) to prevent parts floating or bridging during SMD reflow.
 
-### 3. Automated Part Importer CLI
-To automatically add downloaded online parts (from SnapEDA, DigiKey, Ultra Librarian, Component Search Engine, etc.) directly into the library with mandatory fields, footprint linking, and category placement:
+### 3. Automated Part Importer (1-Click Desktop GUI & Watcher)
+To make adding downloaded parts from online (SnapEDA, DigiKey, Ultra Librarian, Component Search Engine, LCSC) completely effortless:
 
-**Interactive Mode:**
-```bash
-python scripts/import_part.py
-```
+#### **Double-Click 1-Click Launcher:**
+Simply double-click **`IMPORT_PART_WIZARD.bat`** (Windows) or **`IMPORT_PART_WIZARD.sh`** (Mac/Linux) in the library folder!
 
-**CLI Command Mode:**
-```bash
-python scripts/import_part.py \
-  --symbol path/to/part.kicad_sym \
-  --footprint path/to/part.kicad_mod \
-  --category Power \
-  --mpn "TPS62130" \
-  --mfr "Texas Instruments" \
-  --datasheet "https://www.ti.com/lit/ds/symlink/tps62130.pdf" \
-  --digikey "296-30230-1-ND"
-```
+#### **Features:**
+* 📁 **Drag & Drop / ZIP Auto-Extraction:** Select or drag a `.zip`, `.kicad_sym`, or `.kicad_mod` file.
+* 🟢 **Downloads Watcher Mode:** Click **"Start Downloads Watcher"**. As soon as you click "Download" in your browser, the wizard automatically pops up with pre-filled fields!
+* 🚀 **1-Click Push:** Injects mandatory fields, links footprints, validates compliance, and pushes directly to `master`!
 
 ---
+
 
 ## Automated Validation & CI/CD
 
