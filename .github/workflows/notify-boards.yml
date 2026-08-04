@@ -12,13 +12,14 @@ jobs:
       - name: Send Dispatch Event to Board Template
         uses: peter-evans/repository-dispatch@v3
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.ORG_DISPATCH_TOKEN || secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
           repository: purduerov/board-template
           event-type: update-library
           
       - name: Send Dispatch Event to New Member Board
         uses: peter-evans/repository-dispatch@v3
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.ORG_DISPATCH_TOKEN || secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
           repository: purduerov/X19-Electrical-New-Member-Board
           event-type: update-library
+
