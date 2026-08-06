@@ -16,14 +16,18 @@ def check_kicad_symbol_file(filepath):
     if not os.path.exists(filepath):
         return [f"File not found: {filepath}"]
 
+    sym_pattern = re.compile(r'\(symbol "([^"]+)"')
+    sub_sym_pattern = re.compile(r'_[0-9]+_[0-9]+$')
+    prop_pattern = re.compile(r'\(property "([^"]+)" "([^"]*)"')
+
     with open(filepath, 'r', encoding='utf-8') as f:
         for line_num, line in enumerate(f, 1):
             # Parse symbol declaration (matches: (symbol "SymbolName" ...)
-            sym_match = re.search(r'\(symbol "([^"]+)"', line)
+            sym_match = sym_pattern.search(line)
             if sym_match:
                 symbol_name = sym_match.group(1)
                 # Skip sub-symbols (units/graphic parts) which end in _[0-9]+_[0-9]+
-                if re.search(r'_[0-9]+_[0-9]+$', symbol_name):
+                if sub_sym_pattern.search(symbol_name):
                     continue
                 if current_symbol:
                     # Validate previous symbol fields before starting the new one
@@ -34,7 +38,7 @@ def check_kicad_symbol_file(filepath):
                 present_fields = set()
                 
             # Parse properties (matches: (property "PropertyName" "PropertyValue" ...)
-            prop_match = re.search(r'\(property "([^"]+)" "([^"]*)"', line)
+            prop_match = prop_pattern.search(line)
             if prop_match and current_symbol:
                 field_name = prop_match.group(1)
                 field_value = prop_match.group(2)
