@@ -1,31 +1,28 @@
-# Central Purdue ROV Design Blocks
+# Purdue ROV Design Blocks
 
-Design Blocks (modular circuit fragments) allow the team to reuse pre-routed, club-approved circuit topologies (e.g., regulators, transceivers, microcontrollers) across multiple designs. This reduces design time, prevents layout errors, and ensures power/signal integrity.
+Reusable sub-circuits and layout snippets (regulators, transceivers, microcontrollers) for Purdue ROV hardware designs. Using verified blocks ensures consistent routing, correct pinouts, and tested power/signal integrity across boards.
 
-## Structure
+## Directory Layout
+
+Each design block lives in its own folder containing schematic, layout, and specification notes:
 
 ```
 Design_Blocks/
-├── power_regulator_5v/
-│   ├── power_regulator_5v.kicad_sch   # Schematic sheet of the block
-│   ├── power_regulator_5v.kicad_pcb   # Layout template of the block
-│   └── README.md                       # Description, pinout, specs, and layout advice
-└── can_bus_transceiver/
-    ├── can_bus_transceiver.kicad_sch
-    ├── can_bus_transceiver.kicad_pcb
-    └── README.md
+├── <block_name>/
+│   ├── <block_name>.kicad_sch   # Standalone hierarchical schematic sheet
+│   ├── <block_name>.kicad_pcb   # Reference layout and copper routing
+│   └── README.md                # Operating specs, pinout, and keepouts
 ```
 
-## Guidelines for Creating Design Blocks
+## Guidelines for Adding Design Blocks
 
-1. **Schematic Hierarchical Sheets**: 
-   - Draw the circuit on a standalone sub-sheet.
-   - Use **Hierarchical Labels** for all inputs, outputs, power, and ground connections to make integration straightforward.
-2. **PCB Layout Topology**:
-   - Route the block with optimal trace widths, via placements, and pour geometries (especially for switching regulators and differential signal lines).
-   - Draw a boundary on a user/info layer to show the recommended footprint footprint/keepout area.
-3. **Documentation**:
-   - Provide a brief `README.md` with:
-     - Input/Output operating limits (e.g., "Input: 7V - 24V, Output: 5V @ 2A").
-     - Minimum clearance/keepout guidelines.
-     - Stackup requirements (e.g., "Tested on 4-layer stackup with solid GND reference plane").
+1. **Hierarchical Schematic**:
+   - Draw the block on a standalone sheet.
+   - Use hierarchical labels for all inputs, outputs, power rails, and grounds.
+2. **Layout & Routing**:
+   - Route with proven trace widths, via arrays, and copper pour geometry (especially for switching regulators and high-speed differential pairs).
+   - Include a keepout or boundary outline on a documentation layer indicating recommended footprint area.
+3. **Documentation (`README.md`)**:
+   - Operating limits (input voltage range, maximum continuous current, switching frequency).
+   - Thermal and layer stackup requirements (e.g. 4-layer stack with internal GND reference).
+   - Any external component requirements (decoupling, pullups, filtering).
