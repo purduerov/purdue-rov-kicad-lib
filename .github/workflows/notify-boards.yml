@@ -1,4 +1,4 @@
-name: 📢 Notify Board Repositories
+name: Notify Board Repositories
 
 on:
   push:
@@ -8,18 +8,18 @@ on:
 jobs:
   dispatch-update:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        repo:
+          - board-template
+          - X19-Electrical-New-Member-Board
+          - X19-Float-Board
     steps:
-      - name: Send Dispatch Event to Board Template
+      - name: Dispatch Library Update Event
         uses: peter-evans/repository-dispatch@v3
+        continue-on-error: true
         with:
           token: ${{ secrets.ORG_DISPATCH_TOKEN || secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
-          repository: purduerov/board-template
+          repository: purduerov/${{{ matrix.repo }}}
           event-type: update-library
-          
-      - name: Send Dispatch Event to New Member Board
-        uses: peter-evans/repository-dispatch@v3
-        with:
-          token: ${{ secrets.ORG_DISPATCH_TOKEN || secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
-          repository: purduerov/X19-Electrical-New-Member-Board
-          event-type: update-library
-
