@@ -27,35 +27,27 @@ purdue-rov-kicad-lib/
 └── scripts/                        # Import, linting, and maintenance utilities
 ```
 
-## Managing Components (GUI)
+## Managing & Adding Components (GUI)
 
-Launch the visual component manager to browse, filter, edit, delete, and validate parts across all 6 categories:
+Launch the all-in-one component manager to browse, search, edit, import, delete, and validate parts:
 
 - **Windows:** Double-click `LIBRARY_MANAGER.bat`
 - **macOS / Linux:** Run `./LIBRARY_MANAGER.sh` (or `python3 scripts/library_manager_gui.py`)
 
-Features:
-* 🔍 **Live Search & Category Filtering:** Search across MPN, Manufacturer, and Description in real-time.
+### Features
+* 🔍 **Live Search & Filtering:** Search across MPN, Manufacturer, Description, and Category.
+* ➕ **1-Click Part Ingestion:** Click **➕ Add / Import Part** to drag & drop `.zip` downloads from SnapEDA, Ultra Librarian, DigiKey, or LCSC. Automatically extracts symbols, footprints (`.kicad_mod`), and 3D models.
+* 🟢 **Downloads Watcher:** Optional background watcher that auto-detects newly downloaded CAD files in your `~/Downloads` folder.
 * ⚙️ **In-Place Field Editor:** Edit and save any mandatory symbol metadata, or change categories with 1-click.
-* ➕ **Integrated Part Importer:** Directly launch the drag-and-drop import wizard from the toolbar.
 * 🗑️ **Safe Component Deletion:** Cleanly delete unused symbols from `.kicad_sym` category files.
 * 🔍 **1-Click Linter Validation:** Verify 100% compliance across all 6 library files before pushing.
 * 🚀 **Git Sync:** Direct pull, commit, and push integration with GitHub `master`.
 
-## Adding New Components
-
-When downloading new parts (from SnapEDA, DigiKey, Ultra Librarian, LCSC, etc.), use the import wizard to format and validate them:
-
-### Using the Import Wizard
-- **Windows:** Double-click `IMPORT_PART_WIZARD.bat`
-- **macOS / Linux:** Run `./IMPORT_PART_WIZARD.sh` (or `python3 scripts/part_importer_gui.py`)
-
-The wizard unpacks downloaded ZIP files, copies `.kicad_mod` files into the appropriate `.pretty` directory, links 3D models, and prompts for required symbol fields.
-
-### Using the CLI Script
+### CLI Import (Optional)
 ```bash
 python3 scripts/import_part.py --symbol <path-to-sym> --footprint <path-to-mod> --category Power
 ```
+
 
 
 ## Required Symbol Fields

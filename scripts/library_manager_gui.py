@@ -1,8 +1,7 @@
-#!/usr/bin/env bash
 #!/usr/bin/env python3
 """
 Purdue ROV KiCad Central Library Manager GUI
-View, search, edit, add, delete, validate, and sync components across all 6 standardized categories.
+All-in-one visual dashboard: Browse, search, edit, add, import (ZIP/sym/mod), delete, validate, and sync components.
 """
 
 import os
@@ -11,6 +10,9 @@ import re
 import zipfile
 import shutil
 import subprocess
+import threading
+import time
+import tempfile
 import webbrowser
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -21,6 +23,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SYMBOLS_DIR = BASE_DIR / "Symbols"
 FOOTPRINTS_DIR = BASE_DIR / "Footprints"
 MODELS_DIR = BASE_DIR / "3D_Models"
+DOWNLOADS_DIR = Path.home() / "Downloads"
 
 CATEGORIES = ["Passives", "Power", "Logic", "Connectors", "Sensors", "Mech"]
 CATEGORY_FILES = {
@@ -34,12 +37,6 @@ CATEGORY_FILES = {
 
 MANDATORY_FIELDS = ["Category", "MPN", "Manufacturer", "DigiKey", "Datasheet", "Temp_Range"]
 
-def get_category_from_filename(filename):
-    name = Path(filename).stem.lower()
-    for cat in CATEGORIES:
-        if cat.lower() in name:
-            return cat
-    return "Passives"
 
 class LibraryParser:
     @staticmethod
@@ -57,18 +54,13 @@ class LibraryParser:
                 print(f"Error reading {sym_file}: {e}")
                 continue
 
-            # Parse top-level symbols
-            # Matches: (symbol "NAME" ... )
-            # KiCad S-expression block parser
             sym_matches = list(re.finditer(r'\n\s*\(symbol\s+"([^"]+)"', content))
             for i, match in enumerate(sym_matches):
                 sym_name = match.group(1)
-                # Skip sub-symbols / units
                 if re.search(r'_\d+_\d+$', sym_name):
                     continue
 
                 start_pos = match.start()
-                # Determine end position: either start of next top symbol or end of library
                 next_top_pos = None
                 for next_match in sym_matches[i+1:]:
                     if not re.search(r'_\d+_\d+$', next_match.group(1)):
@@ -78,13 +70,10 @@ class LibraryParser:
                 if next_top_pos is not None:
                     raw_sym = content[start_pos:next_top_pos]
                 else:
-                    # Last symbol before closing library paren
                     last_paren = content.rfind(')')
                     raw_sym = content[start_pos:last_paren] if last_paren != -1 else content[start_pos:]
 
-                # Extract properties
                 properties = {}
-                # Property pattern: (property "Key" "Value" ...)
                 prop_iter = re.finditer(r'\(property\s+"([^"]+)"\s+"([^"]*)"(?:\s+\(id\s+(\d+)\))?(?:\s+\(at\s+([^\)]+)\))?(?:\s+\(effects\s+([^\)]+(?:\([^\)]*\))*)\))?', raw_sym)
                 for pm in prop_iter:
                     key = pm.group(1)
@@ -103,19 +92,14 @@ class LibraryParser:
     @staticmethod
     def save_symbol(sym_name, old_category, new_category, new_properties, raw_sym_text):
         """Updates or moves a symbol with new properties."""
-        # 1. Update properties inside raw_sym_text
         updated_sym = raw_sym_text
-        
-        # Ensure Category property matches new_category
         new_properties["Category"] = new_category
 
         for prop_name, prop_val in new_properties.items():
-            # Check if property already exists in raw_sym_text
             prop_regex = rf'(\(property\s+"{re.escape(prop_name)}"\s+")[^"]*(")'
             if re.search(prop_regex, updated_sym):
                 updated_sym = re.sub(prop_regex, rf'\g<1>{prop_val}\g<2>', updated_sym)
             else:
-                # Insert after (property "Value" ...) or at top of symbol
                 val_m = re.search(r'\(property\s+"Value"\s+"[^"]*"\s*(?:\([^\)]*\)\s*)*\)', updated_sym)
                 prop_str = f'\n    (property "{prop_name}" "{prop_val}" (at 0 0 0)\n      (effects (font (size 1.27 1.27)) hide)\n    )'
                 if val_m:
@@ -125,26 +109,21 @@ class LibraryParser:
                     first_sym_line = updated_sym.find('\n')
                     updated_sym = updated_sym[:first_sym_line] + prop_str + updated_sym[first_sym_line:]
 
-        # 2. If category didn't change, replace in place
         old_file = SYMBOLS_DIR / f"{CATEGORY_FILES[old_category]}.kicad_sym"
         new_file = SYMBOLS_DIR / f"{CATEGORY_FILES[new_category]}.kicad_sym"
 
         if old_category == new_category and old_file.exists():
             with open(old_file, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
-            # Replace old raw block
             if raw_sym_text in content:
                 content = content.replace(raw_sym_text, updated_sym)
             else:
-                # Fallback replace symbol declaration
                 pattern = rf'(\(symbol\s+"{re.escape(sym_name)}".*?\n  \))'
                 content = re.sub(pattern, updated_sym, content, flags=re.DOTALL)
             with open(old_file, 'w', encoding='utf-8') as f:
                 f.write(content)
         else:
-            # Delete from old file
             LibraryParser.delete_symbol(sym_name, old_category, raw_sym_text)
-            # Append to new file
             LibraryParser.insert_symbol(new_category, updated_sym)
 
     @staticmethod
@@ -159,11 +138,9 @@ class LibraryParser:
         if raw_sym_text and raw_sym_text in content:
             content = content.replace(raw_sym_text, "")
         else:
-            # Fallback regex removal
             pattern = rf'\n\s*\(symbol\s+"{re.escape(sym_name)}".*?\n  \)'
             content = re.sub(pattern, "", content, flags=re.DOTALL)
 
-        # Clean multiple blank lines
         content = re.sub(r'\n\s*\n\s*\n', '\n\n', content)
         with open(target_file, 'w', encoding='utf-8') as f:
             f.write(content)
@@ -187,6 +164,245 @@ class LibraryParser:
 
         with open(target_file, 'w', encoding='utf-8') as f:
             f.write(new_content)
+
+
+class ImportPartDialog:
+    """Integrated Add / Import Part Dialog with drag-and-drop / download watcher support."""
+    def __init__(self, parent, callback_on_imported):
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title("➕ Add / Import Component to Library")
+        self.dialog.geometry("640x700")
+        self.dialog.minsize(580, 600)
+        self.dialog.configure(bg="#1e1e2e")
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+
+        self.callback_on_imported = callback_on_imported
+        self.sym_file = None
+        self.fp_file = None
+        self.temp_dir = None
+        self.watcher_running = False
+        self.seen_downloads = set()
+
+        self.build_ui()
+        self.init_seen_downloads()
+
+    def build_ui(self):
+        main_frame = ttk.Frame(self.dialog, style="Surface.TFrame", padding="20")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        title = ttk.Label(main_frame, text="Import New Component", style="Header.TLabel")
+        title.pack(anchor="w", pady=(0, 2))
+        subtitle = ttk.Label(main_frame, text="Select or drop .zip / .kicad_sym / .kicad_mod downloads", style="Muted.TLabel")
+        subtitle.pack(anchor="w", pady=(0, 15))
+
+        # Drop / Select Box
+        drop_frame = tk.Frame(main_frame, bg="#313244", highlightbackground="#45475a", highlightthickness=2, height=80)
+        drop_frame.pack(fill=tk.X, pady=(0, 10))
+        drop_frame.pack_propagate(False)
+
+        self.lbl_file_status = tk.Label(drop_frame, text="📁 Click 'Browse Files...' or Drop KiCad Download ZIP here", bg="#313244", fg="#a6adc8", font=("Segoe UI", 10))
+        self.lbl_file_status.pack(expand=True)
+
+        browse_row = ttk.Frame(main_frame, style="Surface.TFrame")
+        browse_row.pack(fill=tk.X, pady=(0, 15))
+
+        btn_browse = ttk.Button(browse_row, text="Browse Files...", command=self.browse_files)
+        btn_browse.pack(side=tk.LEFT)
+
+        self.btn_watcher = ttk.Button(browse_row, text="🟢 Start Downloads Watcher", command=self.toggle_watcher)
+        self.btn_watcher.pack(side=tk.RIGHT)
+
+        # Category Selection
+        lbl_cat = ttk.Label(main_frame, text="Component Category:", style="Surface.TLabel", font=("Segoe UI", 10, "bold"))
+        lbl_cat.pack(anchor="w", pady=(0, 5))
+
+        cat_frame = ttk.Frame(main_frame, style="Surface.TFrame")
+        cat_frame.pack(fill=tk.X, pady=(0, 15))
+
+        self.selected_category = tk.StringVar(value="Power")
+        for cat in CATEGORIES:
+            rb = tk.Radiobutton(cat_frame, text=cat, value=cat, variable=self.selected_category,
+                                bg="#1e1e2e", fg="#cdd6f4", selectcolor="#313244", activebackground="#1e1e2e",
+                                activeforeground="#cba6f7", font=("Segoe UI", 9))
+            rb.pack(side=tk.LEFT, padx=4)
+
+        # Fields Form
+        fields_frame = ttk.Frame(main_frame, style="Surface.TFrame")
+        fields_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        self.entries = {}
+        fields = [
+            ("MPN", "Manufacturer Part Number *"),
+            ("Manufacturer", "Manufacturer Name *"),
+            ("Datasheet", "Datasheet PDF URL *"),
+            ("DigiKey", "DigiKey SKU / Link *"),
+            ("Temp_Range", "Temperature Range (e.g. -40°C to 125°C) *"),
+            ("Description", "Description / Value")
+        ]
+
+        for idx, (field_key, field_label) in enumerate(fields):
+            lbl = ttk.Label(fields_frame, text=field_label, style="Surface.TLabel", font=("Segoe UI", 9))
+            lbl.grid(row=idx*2, column=0, sticky="w", pady=(2, 0))
+            
+            ent = tk.Entry(fields_frame, bg="#313244", fg="#cdd6f4", insertbackground="#cdd6f4",
+                           relief="flat", highlightbackground="#45475a", highlightthickness=1, font=("Segoe UI", 9))
+            ent.grid(row=idx*2+1, column=0, sticky="ew", pady=(0, 6), ipady=3)
+            if field_key == "Temp_Range":
+                ent.insert(0, "-40°C to 125°C")
+            self.entries[field_key] = ent
+
+        fields_frame.columnconfigure(0, weight=1)
+
+        # Action Buttons
+        btn_frame = ttk.Frame(main_frame, style="Surface.TFrame")
+        btn_frame.pack(fill=tk.X, pady=(10, 0))
+
+        btn_cancel = ttk.Button(btn_frame, text="Cancel", command=self.dialog.destroy)
+        btn_cancel.pack(side=tk.LEFT)
+
+        btn_import = ttk.Button(btn_frame, text="🚀 Ingest & Add to Library", style="Success.TButton", command=self.process_import)
+        btn_import.pack(side=tk.RIGHT)
+
+    def browse_files(self):
+        file_path = filedialog.askopenfilename(
+            title="Select KiCad Part or ZIP",
+            filetypes=[("KiCad Files & ZIPs", "*.kicad_sym *.kicad_mod *.zip"), ("All Files", "*.*")]
+        )
+        if file_path:
+            self.load_file(Path(file_path))
+
+    def load_file(self, file_path):
+        if file_path.suffix.lower() == ".zip":
+            self.extract_zip(file_path)
+        elif file_path.suffix.lower() == ".kicad_sym":
+            self.sym_file = file_path
+            self.lbl_file_status.config(text=f"📄 Symbol: {file_path.name}")
+            self.auto_fill_fields_from_symbol(file_path)
+        elif file_path.suffix.lower() == ".kicad_mod":
+            self.fp_file = file_path
+            self.lbl_file_status.config(text=f"📦 Footprint: {file_path.name}")
+
+    def extract_zip(self, zip_path):
+        self.temp_dir = tempfile.mkdtemp()
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(self.temp_dir)
+            
+        found_syms = list(Path(self.temp_dir).rglob("*.kicad_sym"))
+        found_fps = list(Path(self.temp_dir).rglob("*.kicad_mod"))
+        
+        if found_syms:
+            self.sym_file = found_syms[0]
+            self.auto_fill_fields_from_symbol(self.sym_file)
+        if found_fps:
+            self.fp_file = found_fps[0]
+            
+        sym_name = self.sym_file.name if self.sym_file else "None"
+        fp_name = self.fp_file.name if self.fp_file else "None"
+        self.lbl_file_status.config(text=f"📦 ZIP: {zip_path.name}\n(Sym: {sym_name} | FP: {fp_name})")
+
+    def auto_fill_fields_from_symbol(self, sym_path):
+        content = sym_path.read_text(encoding="utf-8", errors="ignore")
+        props = {}
+        for match in re.finditer(r'\(property "([^"]+)" "([^"]*)"', content):
+            k, v = match.group(1), match.group(2)
+            if k == "DigiKey_SKU":
+                k = "DigiKey"
+            props[k] = v
+            
+        for key, entry in self.entries.items():
+            if key in props and props[key]:
+                entry.delete(0, tk.END)
+                entry.insert(0, props[key])
+
+    def init_seen_downloads(self):
+        if DOWNLOADS_DIR.exists():
+            self.seen_downloads = set(DOWNLOADS_DIR.glob("*"))
+
+    def toggle_watcher(self):
+        if not self.watcher_running:
+            self.watcher_running = True
+            self.btn_watcher.config(text="🔴 Stop Downloads Watcher")
+            threading.Thread(target=self.watch_loop, daemon=True).start()
+        else:
+            self.watcher_running = False
+            self.btn_watcher.config(text="🟢 Start Downloads Watcher")
+
+    def watch_loop(self):
+        while self.watcher_running:
+            time.sleep(2)
+            if not DOWNLOADS_DIR.exists():
+                continue
+            current_files = set(DOWNLOADS_DIR.glob("*"))
+            new_files = current_files - self.seen_downloads
+            self.seen_downloads = current_files
+            
+            for f in new_files:
+                if f.suffix.lower() in [".kicad_sym", ".kicad_mod", ".zip"]:
+                    self.dialog.after(0, self.on_new_file_detected, f)
+
+    def on_new_file_detected(self, file_path):
+        self.dialog.lift()
+        messagebox.showinfo("New Part Downloaded!", f"Detected new part in Downloads:\n{file_path.name}")
+        self.load_file(file_path)
+
+    def process_import(self):
+        if not self.sym_file:
+            messagebox.showerror("Error", "Please select or drop a valid .kicad_sym or .zip file!")
+            return
+            
+        category = self.selected_category.get()
+        field_values = {k: v.get().strip() for k, v in self.entries.items()}
+        field_values["Category"] = category
+
+        # Copy footprint if present
+        if self.fp_file:
+            target_pretty = FOOTPRINTS_DIR / f"rov_{category.lower()}.pretty"
+            target_pretty.mkdir(parents=True, exist_ok=True)
+            dest_fp = target_pretty / self.fp_file.name
+            shutil.copy2(self.fp_file, dest_fp)
+            field_values["Footprint"] = f"rov_{category.lower()}:{self.fp_file.stem}"
+
+        # Parse and inject symbol
+        with open(self.sym_file, 'r', encoding='utf-8', errors='ignore') as f:
+            sym_content = f.read()
+
+        # Extract top level symbol block
+        sym_match = re.search(r'\n\s*\(symbol\s+"([^"]+)".*?\n  \)', sym_content, re.DOTALL)
+        if not sym_match:
+            # Try matching full symbol
+            sym_match = re.search(r'\(symbol\s+"([^"]+)".*\)', sym_content, re.DOTALL)
+
+        if not sym_match:
+            messagebox.showerror("Error", "Could not parse valid symbol block from file!")
+            return
+
+        raw_sym = sym_match.group(0)
+        sym_name = sym_match.group(1)
+
+        # Inject properties
+        for k, v in field_values.items():
+            if v:
+                prop_str = f'\n    (property "{k}" "{v}" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))'
+                raw_sym = re.sub(rf'\(property "{k}" "[^"]*"[^\)]*\)', '', raw_sym)
+                # Insert after value property
+                val_m = re.search(r'\(property "Value" "[^"]*"[^\)]*\)', raw_sym)
+                if val_m:
+                    idx = val_m.end()
+                    raw_sym = raw_sym[:idx] + prop_str + raw_sym[idx:]
+                else:
+                    first_line = raw_sym.find('\n')
+                    raw_sym = raw_sym[:first_line] + prop_str + raw_sym[first_line:]
+
+        # Save to category file
+        try:
+            LibraryParser.insert_symbol(category, raw_sym)
+            messagebox.showinfo("Success", f"Component '{sym_name}' successfully added to {category} library!")
+            self.dialog.destroy()
+            if self.callback_on_imported:
+                self.callback_on_imported()
+        except Exception as e:
+            messagebox.showerror("Import Error", f"Failed to save symbol to library: {e}")
 
 
 class LibraryManagerApp:
@@ -238,13 +454,11 @@ class LibraryManagerApp:
         self.style.configure("Danger.TButton", background="#f38ba8", foreground="#11111b", padding=6)
         self.style.map("Danger.TButton", background=[("active", "#eba0ac")])
 
-        # Treeview styling
         self.style.configure("Treeview", background="#1e1e2e", foreground="#cdd6f4", fieldbackground="#1e1e2e", rowheight=28, font=("Segoe UI", 10))
         self.style.configure("Treeview.Heading", background="#313244", foreground="#cba6f7", font=("Segoe UI", 10, "bold"))
         self.style.map("Treeview", background=[("selected", "#45475a")], foreground=[("selected", "#89b4fa")])
 
     def build_ui(self):
-        # Top toolbar
         toolbar = ttk.Frame(self.root, style="Surface.TFrame", padding="10")
         toolbar.pack(fill=tk.X, side=tk.TOP)
 
@@ -263,15 +477,12 @@ class LibraryManagerApp:
         btn_git = ttk.Button(toolbar, text="🚀 Git Sync", command=self.git_sync)
         btn_git.pack(side=tk.RIGHT, padx=5)
 
-        # Main Split Container
         paned = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
         paned.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        # Left Panel: Search, Category Filter, and Part List
         left_frame = ttk.Frame(paned, style="Surface.TFrame", padding=10)
         paned.add(left_frame, weight=3)
 
-        # Filter bar
         filter_frame = ttk.Frame(left_frame, style="Surface.TFrame")
         filter_frame.pack(fill=tk.X, pady=(0, 10))
 
@@ -287,7 +498,6 @@ class LibraryManagerApp:
         cat_combo.pack(side=tk.LEFT)
         cat_combo.bind("<<ComboboxSelected>>", lambda e: self.apply_filters())
 
-        # Treeview table
         tree_frame = ttk.Frame(left_frame, style="Surface.TFrame")
         tree_frame.pack(fill=tk.BOTH, expand=True)
 
@@ -316,18 +526,15 @@ class LibraryManagerApp:
 
         self.tree.bind("<<TreeviewSelect>>", self.on_symbol_select)
 
-        # Left bottom count label
         self.lbl_count = ttk.Label(left_frame, text="0 components loaded", style="Muted.TLabel")
         self.lbl_count.pack(anchor="w", pady=(5, 0))
 
-        # Right Panel: Inspector & Property Editor
         right_frame = ttk.Frame(paned, style="Surface.TFrame", padding=15)
         paned.add(right_frame, weight=2)
 
         right_header = ttk.Label(right_frame, text="⚙️ Component Properties", style="Header.TLabel")
         right_header.pack(anchor="w", pady=(0, 10))
 
-        # Editor Form inside Scrollable Canvas
         canvas = tk.Canvas(right_frame, bg="#1e1e2e", highlightthickness=0)
         form_scroll = ttk.Scrollbar(right_frame, orient=tk.VERTICAL, command=canvas.yview)
         self.form_frame = ttk.Frame(canvas, style="Surface.TFrame")
@@ -374,11 +581,9 @@ class LibraryManagerApp:
                 entry.pack(fill=tk.X, pady=(0, 4), ipady=3)
                 self.fields_entries[prop_key] = var
 
-        # Link button for Datasheet
         btn_open_ds = ttk.Button(self.form_frame, text="🌐 Open Datasheet URL", command=self.open_datasheet)
         btn_open_ds.pack(anchor="w", pady=(5, 15))
 
-        # Bottom Action Buttons
         action_box = ttk.Frame(right_frame, style="Surface.TFrame")
         action_box.pack(fill=tk.X, side=tk.BOTTOM, pady=(15, 0))
 
@@ -417,7 +622,6 @@ class LibraryManagerApp:
                 if query not in combined_text:
                     continue
 
-            # Check compliance
             is_compliant = all(props.get(f, "").strip() for f in MANDATORY_FIELDS)
             status_icon = "✅" if is_compliant else "⚠️ Incomplete"
 
@@ -467,7 +671,6 @@ class LibraryManagerApp:
         old_cat = data["category"]
         new_cat = self.fields_entries["Category"].get()
 
-        # Build updated properties dict
         new_props = dict(data["properties"])
         for k, var in self.fields_entries.items():
             if k not in ["Name", "Category"]:
@@ -503,12 +706,7 @@ class LibraryManagerApp:
             messagebox.showerror("Error Deleting", f"Failed to delete component: {e}")
 
     def open_add_part_dialog(self):
-        # Open the Part Importer GUI or simple manual addition dialog
-        importer_script = BASE_DIR / "scripts" / "part_importer_gui.py"
-        if importer_script.exists():
-            subprocess.Popen([sys.executable, str(importer_script)])
-        else:
-            messagebox.showinfo("Add Part", "To add parts, drag and drop KiCad symbol/footprint downloads into the importer wizard.")
+        ImportPartDialog(self.root, callback_on_imported=self.refresh_symbols)
 
     def run_linter(self):
         linter_script = BASE_DIR / "scripts" / "linter_validator.py"
@@ -537,6 +735,7 @@ class LibraryManagerApp:
             messagebox.showinfo("Git Sync", "✅ Library changes successfully committed and pushed to GitHub master!")
         except Exception as e:
             messagebox.showerror("Git Sync Failed", f"Git operation failed:\n{e}")
+
 
 if __name__ == "__main__":
     root = tk.Tk()
