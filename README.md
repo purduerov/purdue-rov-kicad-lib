@@ -27,6 +27,21 @@ purdue-rov-kicad-lib/
 └── scripts/                        # Import, linting, and maintenance utilities
 ```
 
+## Managing Components (GUI)
+
+Launch the visual component manager to browse, filter, edit, delete, and validate parts across all 6 categories:
+
+- **Windows:** Double-click `LIBRARY_MANAGER.bat`
+- **macOS / Linux:** Run `./LIBRARY_MANAGER.sh` (or `python3 scripts/library_manager_gui.py`)
+
+Features:
+* 🔍 **Live Search & Category Filtering:** Search across MPN, Manufacturer, and Description in real-time.
+* ⚙️ **In-Place Field Editor:** Edit and save any mandatory symbol metadata, or change categories with 1-click.
+* ➕ **Integrated Part Importer:** Directly launch the drag-and-drop import wizard from the toolbar.
+* 🗑️ **Safe Component Deletion:** Cleanly delete unused symbols from `.kicad_sym` category files.
+* 🔍 **1-Click Linter Validation:** Verify 100% compliance across all 6 library files before pushing.
+* 🚀 **Git Sync:** Direct pull, commit, and push integration with GitHub `master`.
+
 ## Adding New Components
 
 When downloading new parts (from SnapEDA, DigiKey, Ultra Librarian, LCSC, etc.), use the import wizard to format and validate them:
@@ -41,6 +56,7 @@ The wizard unpacks downloaded ZIP files, copies `.kicad_mod` files into the appr
 ```bash
 python3 scripts/import_part.py --symbol <path-to-sym> --footprint <path-to-mod> --category Power
 ```
+
 
 ## Required Symbol Fields
 
