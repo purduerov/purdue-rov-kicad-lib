@@ -488,9 +488,10 @@ class LibraryManagerApp:
 
         ttk.Label(filter_frame, text="🔍 Search:", style="Surface.TLabel").pack(side=tk.LEFT, padx=(0, 5))
         self.search_var = tk.StringVar()
-        self.search_var.trace("w", lambda *args: self.apply_filters())
+        self.search_var.trace_add("write", lambda *args: self.apply_filters())
         search_entry = tk.Entry(filter_frame, textvariable=self.search_var, bg="#313244", fg="#cdd6f4", insertbackground="#cdd6f4", font=("Segoe UI", 10), relief=tk.FLAT)
         search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10), ipady=4)
+
 
         ttk.Label(filter_frame, text="Category:", style="Surface.TLabel").pack(side=tk.LEFT, padx=(0, 5))
         self.category_filter_var = tk.StringVar(value="All")
