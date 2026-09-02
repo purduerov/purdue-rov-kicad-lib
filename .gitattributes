@@ -1,3 +1,29 @@
-*.kicad_sch filter=kicad_sch_cleaner
-*.kicad_pcb filter=kicad_pcb_cleaner
-*.kicad_pro filter=kicad_project_cleaner
+# Auto-detect text files and normalize line endings to LF on commit
+* text=auto eol=lf
+
+# Force LF on shell scripts and unix tools
+*.sh text eol=lf
+*.bash text eol=lf
+*.py text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+
+# Force CRLF on Windows batch files
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# KiCad S-expression files and tables
+*.kicad_sym text eol=lf
+*.kicad_mod text eol=lf
+
+# Binary 3D models and assets
+*.step binary
+*.stp binary
+*.wrl binary
+*.pdf binary
+*.png binary
+*.jpg binary
+*.zip binary
