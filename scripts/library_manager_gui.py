@@ -526,9 +526,27 @@ class LibraryManagerApp:
         tree_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
         self.tree.bind("<<TreeviewSelect>>", self.on_symbol_select)
+        self.tree.bind("<Double-1>", self.on_symbol_double_click)
+        self.tree.bind("<Button-3>", self.show_context_menu)
+        self.tree.bind("<Button-2>", self.show_context_menu) # macOS right click support
+
+        # Keyboard shortcuts
+        self.root.bind("<Control-f>", lambda e: self.focus_search())
+        self.root.bind("<Command-f>", lambda e: self.focus_search())
+        self.root.bind("<Control-s>", lambda e: self.save_current_symbol())
+        self.root.bind("<Command-s>", lambda e: self.save_current_symbol())
+
+        # Context menu
+        self.context_menu = tk.Menu(self.root, tearoff=0, bg="#282a36", fg="#f8f8f2", activebackground="#bd93f9", activeforeground="#282a36")
+        self.context_menu.add_command(label="📋 Copy MPN", command=self.copy_mpn)
+        self.context_menu.add_command(label="📋 Copy DigiKey SKU", command=self.copy_digikey)
+        self.context_menu.add_command(label="🌐 Open Datasheet URL", command=self.open_datasheet)
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="🗑️ Delete Component", command=self.delete_current_symbol)
 
         self.lbl_count = ttk.Label(left_frame, text="0 components loaded", style="Muted.TLabel")
         self.lbl_count.pack(anchor="w", pady=(5, 0))
+
 
         right_frame = ttk.Frame(paned, style="Surface.TFrame", padding=15)
         paned.add(right_frame, weight=2)
@@ -630,7 +648,49 @@ class LibraryManagerApp:
             self.tree.insert("", tk.END, iid=name, values=(name, cat, mpn, mfr, dk, status_icon))
 
         count = len(self.filtered_symbols)
-        self.lbl_count.config(text=f"{count} component{'s' if count != 1 else ''} shown (Total {len(self.symbols)} in library)")
+        # Calculate category breakdown
+        cat_counts = {}
+        for s in self.symbols.values():
+            c = s.get("category", "Other")
+            cat_counts[c] = cat_counts.get(c, 0) + 1
+        
+        breakdown_str = " | ".join(f"{c}: {cat_counts.get(c, 0)}" for c in CATEGORIES)
+        self.lbl_count.config(text=f"📊 Showing {count} of {len(self.symbols)} parts  [{breakdown_str}]")
+
+    def focus_search(self):
+        # Focus the search entry box
+        for widget in self.root.winfo_children():
+            # traverse to find search entry
+            pass
+        self.search_var.set("")
+
+    def show_context_menu(self, event):
+        item = self.tree.identify_row(event.y)
+        if item:
+            self.tree.selection_set(item)
+            self.on_symbol_select(None)
+            self.context_menu.post(event.x_root, event.y_root)
+
+    def on_symbol_double_click(self, event):
+        item = self.tree.identify_row(event.y)
+        if item:
+            self.tree.selection_set(item)
+            self.on_symbol_select(None)
+
+    def copy_mpn(self):
+        mpn = self.fields_entries["MPN"].get().strip()
+        if mpn:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(mpn)
+            self.root.update()
+
+    def copy_digikey(self):
+        dk = self.fields_entries["DigiKey"].get().strip()
+        if dk:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(dk)
+            self.root.update()
+
 
     def on_symbol_select(self, event):
         selected = self.tree.selection()
