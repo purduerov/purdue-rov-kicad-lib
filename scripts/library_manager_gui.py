@@ -12,8 +12,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dependency_check import ensure_dependencies
 
-# Verify critical GUI and network libraries, prompt/auto-install if missing
-if not ensure_dependencies({"tkinter": None, "requests": "requests"}, prompt_if_missing=True):
+# Verify critical GUI and system libraries, prompt if missing
+if not ensure_dependencies({"tkinter": None}, prompt_if_missing=True):
     sys.exit(1)
 
 import re

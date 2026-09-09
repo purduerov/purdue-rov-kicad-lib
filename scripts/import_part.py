@@ -28,10 +28,6 @@ import subprocess
 
 # Add script directory to sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from dependency_check import ensure_dependencies
-
-# Verify required libraries
-ensure_dependencies({"requests": "requests"}, prompt_if_missing=True)
 
 from kicad_sym_utils import (
     validate_sexpr,

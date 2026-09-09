@@ -1,7 +1,8 @@
 """
 Purdue ROV KiCad Tools - Dependency Check & Bootstrap Helper
-Ensures all required Python packages (like tkinter, requests, etc.) are available.
-If a package is missing, prompts the user or automatically installs it via pip.
+Ensures all required Python packages (like tkinter, etc.) are available.
+If a package is missing, prompts the user or automatically installs it via pip,
+handling modern PEP 668 externally-managed environments (Homebrew, Linux distros).
 """
 
 import sys
@@ -45,6 +46,42 @@ def _show_error_dialog(title, message):
             pass
     print(f"\n[ERROR: {title}]\n{message}\n", file=sys.stderr)
 
+def _try_pip_install(pkg_names):
+    """
+    Attempts pip install.
+    If PEP 668 externally managed environment is encountered (e.g. Homebrew on macOS),
+    retries with --break-system-packages or gives brew instructions.
+    """
+    base_cmd = [sys.executable, "-m", "pip", "install"] + pkg_names
+    
+    # 1. Standard attempt
+    res = subprocess.run(base_cmd, capture_output=True, text=True)
+    if res.returncode == 0:
+        return True, ""
+
+    err_output = (res.stderr or "") + (res.stdout or "")
+    
+    # 2. Check for PEP 668 (externally-managed-environment)
+    if "externally-managed-environment" in err_output:
+        # Retry with --break-system-packages (standard user CLI tool override)
+        break_cmd = base_cmd + ["--break-system-packages"]
+        res_break = subprocess.run(break_cmd, capture_output=True, text=True)
+        if res_break.returncode == 0:
+            return True, ""
+        
+        # If that also failed, provide clear platform-specific guidance
+        if sys.platform == "darwin":
+            brew_pkgs = " ".join([f"python-{p}" for p in pkg_names])
+            return False, (
+                f"Your Python environment is managed by Homebrew (PEP 668).\n"
+                f"Please run:\n"
+                f"  brew install {brew_pkgs}\n"
+                f"or run with --break-system-packages:\n"
+                f"  {' '.join(break_cmd)}"
+            )
+
+    return False, err_output.strip()
+
 def ensure_dependencies(packages, auto_install=False, prompt_if_missing=True):
     """
     Checks that the specified Python modules can be imported.
@@ -82,14 +119,19 @@ def ensure_dependencies(packages, auto_install=False, prompt_if_missing=True):
                 "2. Find Python, click the 3 dots (...) and choose 'Modify'\n"
                 "3. Ensure 'tcl/tk and IDLE' is checked and click Next/Install."
             )
+        elif sys.platform == "darwin":
+            msg = (
+                "Python 'tkinter' is missing on macOS!\n\n"
+                "To install it via Homebrew, run:\n"
+                "  brew install python-tk"
+            )
         else:
             msg = (
                 "Python 'tkinter' is missing!\n\n"
-                "On Linux/macOS, install it via your package manager:\n"
+                "On Linux, install it via your package manager:\n"
                 "  Ubuntu/Debian: sudo apt-get install python3-tk\n"
                 "  Fedora:        sudo dnf install python3-tkinter\n"
-                "  Arch:          sudo pacman -S tk\n"
-                "  Homebrew:      brew install python-tk"
+                "  Arch:          sudo pacman -S tk"
             )
         _show_error_dialog("Missing Dependency: tkinter", msg)
         if not missing_pip:
@@ -99,7 +141,6 @@ def ensure_dependencies(packages, auto_install=False, prompt_if_missing=True):
     if missing_pip:
         pkg_names = [p[1] for p in missing_pip]
         pkg_list_str = ", ".join(pkg_names)
-        install_cmd = [sys.executable, "-m", "pip", "install"] + pkg_names
 
         should_install = auto_install
         if not should_install and prompt_if_missing:
@@ -112,20 +153,19 @@ def ensure_dependencies(packages, auto_install=False, prompt_if_missing=True):
 
         if should_install:
             print(f"Installing missing libraries ({pkg_list_str})...")
-            try:
-                subprocess.check_call(install_cmd)
+            success, err_msg = _try_pip_install(pkg_names)
+            if success:
                 print("Installation successful!")
                 return True
-            except subprocess.CalledProcessError as e:
-                err_msg = f"Failed to install {pkg_list_str}.\nError code: {e.returncode}\nRun manually: {' '.join(install_cmd)}"
-                _show_error_dialog("Installation Failed", err_msg)
+            else:
+                _show_error_dialog("Installation Failed", f"Failed to install {pkg_list_str}:\n{err_msg}")
                 return False
         else:
-            print(f"Skipping installation. Please install manually using: {' '.join(install_cmd)}")
+            print(f"Skipping installation. Please install manually: {pkg_list_str}")
             return False
 
     return len(missing_special) == 0
 
 if __name__ == "__main__":
-    ensure_dependencies({"tkinter": None, "requests": "requests"})
+    ensure_dependencies({"tkinter": None})
     print("Dependencies verified successfully.")
