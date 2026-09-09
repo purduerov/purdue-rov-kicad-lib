@@ -16,6 +16,9 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from kicad_sym_utils import autofill_component_data
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 SYMBOLS_DIR = BASE_DIR / "Symbols"
 FOOTPRINTS_DIR = BASE_DIR / "Footprints"
@@ -169,17 +172,17 @@ class PartImporterApp:
 
     def auto_fill_fields_from_symbol(self, sym_path):
         content = sym_path.read_text(encoding="utf-8", errors="ignore")
-        props = {}
-        for match in re.finditer(r'\(property "([^"]+)" "([^"]*)"', content):
-            k, v = match.group(1), match.group(2)
-            if k == "DigiKey_SKU":
-                k = "DigiKey"
-            props[k] = v
+        fp_stem = self.fp_file.stem if self.fp_file else None
+        data = autofill_component_data(content, fp_name=fp_stem)
+        
+        if data.get("Category") and data["Category"] in ALLOWED_CATEGORIES:
+            self.selected_category.set(data["Category"])
             
         for key, entry in self.entries.items():
-            if key in props and props[key]:
+            val = data.get(key, "")
+            if val:
                 entry.delete(0, tk.END)
-                entry.insert(0, props[key])
+                entry.insert(0, val)
 
     def init_seen_downloads(self):
         if DOWNLOADS_DIR.exists():

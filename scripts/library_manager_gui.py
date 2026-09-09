@@ -18,6 +18,19 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from pathlib import Path
 
+# Add script directory for imports
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from kicad_sym_utils import (
+    validate_sexpr,
+    extract_top_symbols,
+    parse_symbol_properties,
+    update_or_inject_properties,
+    autofill_component_data,
+    clean_symbol_lib_file,
+    CATEGORIES,
+    CATEGORY_KEYWORDS
+)
+
 # Paths
 BASE_DIR = Path(__file__).resolve().parent.parent
 SYMBOLS_DIR = BASE_DIR / "Symbols"
@@ -25,7 +38,6 @@ FOOTPRINTS_DIR = BASE_DIR / "Footprints"
 MODELS_DIR = BASE_DIR / "3D_Models"
 DOWNLOADS_DIR = Path.home() / "Downloads"
 
-CATEGORIES = ["Passives", "Power", "Logic", "Connectors", "Sensors", "Mech"]
 CATEGORY_FILES = {
     "Passives": "rov_passives",
     "Power": "rov_power",
@@ -47,6 +59,8 @@ class LibraryParser:
             sym_file = SYMBOLS_DIR / f"{fname}.kicad_sym"
             if not sym_file.exists():
                 continue
+            # Ensure file is clean of illegal # comments
+            clean_symbol_lib_file(sym_file)
             try:
                 with open(sym_file, 'r', encoding='utf-8', errors='ignore') as f:
                     content = f.read()
@@ -54,74 +68,54 @@ class LibraryParser:
                 print(f"Error reading {sym_file}: {e}")
                 continue
 
-            sym_matches = list(re.finditer(r'\n\s*\(symbol\s+"([^"]+)"', content))
-            for i, match in enumerate(sym_matches):
-                sym_name = match.group(1)
-                if re.search(r'_\d+_\d+$', sym_name):
-                    continue
-
-                start_pos = match.start()
-                next_top_pos = None
-                for next_match in sym_matches[i+1:]:
-                    if not re.search(r'_\d+_\d+$', next_match.group(1)):
-                        next_top_pos = next_match.start()
-                        break
-                
-                if next_top_pos is not None:
-                    raw_sym = content[start_pos:next_top_pos]
-                else:
-                    last_paren = content.rfind(')')
-                    raw_sym = content[start_pos:last_paren] if last_paren != -1 else content[start_pos:]
-
-                properties = {}
-                prop_iter = re.finditer(r'\(property\s+"([^"]+)"\s+"([^"]*)"(?:\s+\(id\s+(\d+)\))?(?:\s+\(at\s+([^\)]+)\))?(?:\s+\(effects\s+([^\)]+(?:\([^\)]*\))*)\))?', raw_sym)
-                for pm in prop_iter:
-                    key = pm.group(1)
-                    val = pm.group(2)
-                    properties[key] = val.strip()
-
+            extracted = extract_top_symbols(content)
+            for sym_name, raw_sym, s_idx, e_idx in extracted:
+                props, _ = parse_symbol_properties(raw_sym)
                 symbols[sym_name] = {
                     "name": sym_name,
-                    "category": properties.get("Category", cat),
+                    "category": props.get("Category", cat),
                     "file": sym_file,
                     "raw_text": raw_sym.strip(),
-                    "properties": properties
+                    "properties": props
                 }
         return symbols
 
     @staticmethod
     def save_symbol(sym_name, old_category, new_category, new_properties, raw_sym_text):
-        """Updates or moves a symbol with new properties."""
-        updated_sym = raw_sym_text
+        """Updates or moves a symbol with new properties safely."""
         new_properties["Category"] = new_category
-
-        for prop_name, prop_val in new_properties.items():
-            prop_regex = rf'(\(property\s+"{re.escape(prop_name)}"\s+")[^"]*(")'
-            if re.search(prop_regex, updated_sym):
-                updated_sym = re.sub(prop_regex, rf'\g<1>{prop_val}\g<2>', updated_sym)
-            else:
-                val_m = re.search(r'\(property\s+"Value"\s+"[^"]*"\s*(?:\([^\)]*\)\s*)*\)', updated_sym)
-                prop_str = f'\n    (property "{prop_name}" "{prop_val}" (at 0 0 0)\n      (effects (font (size 1.27 1.27)) hide)\n    )'
-                if val_m:
-                    idx = val_m.end()
-                    updated_sym = updated_sym[:idx] + prop_str + updated_sym[idx:]
-                else:
-                    first_sym_line = updated_sym.find('\n')
-                    updated_sym = updated_sym[:first_sym_line] + prop_str + updated_sym[first_sym_line:]
+        updated_sym = update_or_inject_properties(raw_sym_text, new_properties)
 
         old_file = SYMBOLS_DIR / f"{CATEGORY_FILES[old_category]}.kicad_sym"
         new_file = SYMBOLS_DIR / f"{CATEGORY_FILES[new_category]}.kicad_sym"
 
         if old_category == new_category and old_file.exists():
+            clean_symbol_lib_file(old_file)
             with open(old_file, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
-            if raw_sym_text in content:
-                content = content.replace(raw_sym_text, updated_sym)
-            else:
-                pattern = rf'(\(symbol\s+"{re.escape(sym_name)}".*?\n  \))'
-                content = re.sub(pattern, updated_sym, content, flags=re.DOTALL)
+
+            syms = extract_top_symbols(content)
+            replaced = False
+            for sname, sraw, sstart, send in syms:
+                if sname == sym_name:
+                    content = content[:sstart] + updated_sym + content[send:]
+                    replaced = True
+                    break
+
+            if not replaced:
+                if raw_sym_text in content:
+                    content = content.replace(raw_sym_text, updated_sym, 1)
+                else:
+                    content = content.rstrip()
+                    last_paren = content.rfind(')')
+                    content = content[:last_paren].rstrip() + "\n  " + updated_sym + "\n)\n"
+
+            is_valid, err = validate_sexpr(content)
+            if not is_valid:
+                raise ValueError(f"S-expression validation failed: {err}")
+
             with open(old_file, 'w', encoding='utf-8') as f:
-                f.write(content)
+                f.write(content.strip() + '\n')
         else:
             LibraryParser.delete_symbol(sym_name, old_category, raw_sym_text)
             LibraryParser.insert_symbol(new_category, updated_sym)
@@ -132,35 +126,51 @@ class LibraryParser:
         target_file = SYMBOLS_DIR / f"{CATEGORY_FILES.get(category, 'rov_passives')}.kicad_sym"
         if not target_file.exists():
             return
+        clean_symbol_lib_file(target_file)
         with open(target_file, 'r', encoding='utf-8', errors='ignore') as f:
             content = f.read()
 
-        if raw_sym_text and raw_sym_text in content:
-            content = content.replace(raw_sym_text, "")
-        else:
-            pattern = rf'\n\s*\(symbol\s+"{re.escape(sym_name)}".*?\n  \)'
-            content = re.sub(pattern, "", content, flags=re.DOTALL)
+        syms = extract_top_symbols(content)
+        deleted = False
+        for sname, sraw, sstart, send in syms:
+            if sname == sym_name:
+                content = content[:sstart].rstrip() + "\n" + content[send:].lstrip()
+                deleted = True
+                break
 
-        content = re.sub(r'\n\s*\n\s*\n', '\n\n', content)
-        with open(target_file, 'w', encoding='utf-8') as f:
-            f.write(content)
+        if not deleted and raw_sym_text and raw_sym_text in content:
+            content = content.replace(raw_sym_text, "")
+
+        content = re.sub(r'\n\s*\n\s*\n', '\n\n', content).strip()
+        is_valid, err = validate_sexpr(content)
+        if is_valid:
+            with open(target_file, 'w', encoding='utf-8') as f:
+                f.write(content + '\n')
 
     @staticmethod
     def insert_symbol(category, raw_sym_text):
-        """Appends a new symbol into the specified category file."""
+        """Appends a new symbol into the specified category file with bulletproof S-expression syntax."""
         target_file = SYMBOLS_DIR / f"{CATEGORY_FILES[category]}.kicad_sym"
         if not target_file.exists():
             with open(target_file, 'w', encoding='utf-8') as f:
-                f.write('(kicad_symbol_lib (version 20211014) (generator kicad_symbol_editor)\n)\n')
-        
+                f.write('(kicad_symbol_lib\n  (version 20211014)\n  (generator "kicad_symbol_editor")\n)\n')
+
+        clean_symbol_lib_file(target_file)
         with open(target_file, 'r', encoding='utf-8', errors='ignore') as f:
-            content = f.read()
+            content = f.read().strip()
+
+        if not content.startswith('(kicad_symbol_lib'):
+            content = '(kicad_symbol_lib\n  (version 20211014)\n  (generator "kicad_symbol_editor")\n)'
 
         last_paren = content.rfind(')')
         if last_paren != -1:
             new_content = content[:last_paren].rstrip() + "\n  " + raw_sym_text.strip() + "\n)\n"
         else:
             new_content = content + "\n  " + raw_sym_text.strip() + "\n)\n"
+
+        is_valid, err = validate_sexpr(new_content)
+        if not is_valid:
+            raise ValueError(f"Failed to generate valid S-expression for {category} library: {err}")
 
         with open(target_file, 'w', encoding='utf-8') as f:
             f.write(new_content)
@@ -171,8 +181,8 @@ class ImportPartDialog:
     def __init__(self, parent, callback_on_imported):
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("➕ Add / Import Component to Library")
-        self.dialog.geometry("640x700")
-        self.dialog.minsize(580, 600)
+        self.dialog.geometry("640x740")
+        self.dialog.minsize(580, 640)
         self.dialog.configure(bg="#1e1e2e")
         self.dialog.transient(parent)
         self.dialog.grab_set()
@@ -180,6 +190,7 @@ class ImportPartDialog:
         self.callback_on_imported = callback_on_imported
         self.sym_file = None
         self.fp_file = None
+        self.model_3d_file = None
         self.temp_dir = None
         self.watcher_running = False
         self.seen_downloads = set()
@@ -214,7 +225,7 @@ class ImportPartDialog:
         self.btn_watcher.pack(side=tk.RIGHT)
 
         # Category Selection
-        lbl_cat = ttk.Label(main_frame, text="Component Category:", style="Surface.TLabel", font=("Segoe UI", 10, "bold"))
+        lbl_cat = ttk.Label(main_frame, text="Component Category (Auto-Detected):", style="Surface.TLabel", font=("Segoe UI", 10, "bold"))
         lbl_cat.pack(anchor="w", pady=(0, 5))
 
         cat_frame = ttk.Frame(main_frame, style="Surface.TFrame")
@@ -238,6 +249,7 @@ class ImportPartDialog:
             ("Datasheet", "Datasheet PDF URL *"),
             ("DigiKey", "DigiKey SKU / Link *"),
             ("Temp_Range", "Temperature Range (e.g. -40°C to 125°C) *"),
+            ("Footprint", "Assigned Footprint (e.g. rov_power:QFN-16)"),
             ("Description", "Description / Value")
         ]
 
@@ -247,7 +259,7 @@ class ImportPartDialog:
             
             ent = tk.Entry(fields_frame, bg="#313244", fg="#cdd6f4", insertbackground="#cdd6f4",
                            relief="flat", highlightbackground="#45475a", highlightthickness=1, font=("Segoe UI", 9))
-            ent.grid(row=idx*2+1, column=0, sticky="ew", pady=(0, 6), ipady=3)
+            ent.grid(row=idx*2+1, column=0, sticky="ew", pady=(0, 4), ipady=3)
             if field_key == "Temp_Range":
                 ent.insert(0, "-40°C to 125°C")
             self.entries[field_key] = ent
@@ -267,53 +279,97 @@ class ImportPartDialog:
     def browse_files(self):
         file_path = filedialog.askopenfilename(
             title="Select KiCad Part or ZIP",
-            filetypes=[("KiCad Files & ZIPs", "*.kicad_sym *.kicad_mod *.zip"), ("All Files", "*.*")]
+            filetypes=[("KiCad Files & ZIPs", "*.kicad_sym *.kicad_mod *.zip *.step *.stp"), ("All Files", "*.*")]
         )
         if file_path:
             self.load_file(Path(file_path))
 
     def load_file(self, file_path):
-        if file_path.suffix.lower() == ".zip":
+        suffix = file_path.suffix.lower()
+        if suffix == ".zip":
             self.extract_zip(file_path)
-        elif file_path.suffix.lower() == ".kicad_sym":
+        elif suffix == ".kicad_sym":
             self.sym_file = file_path
-            self.lbl_file_status.config(text=f"📄 Symbol: {file_path.name}")
-            self.auto_fill_fields_from_symbol(file_path)
-        elif file_path.suffix.lower() == ".kicad_mod":
+            self.auto_fill_fields()
+        elif suffix == ".kicad_mod":
             self.fp_file = file_path
-            self.lbl_file_status.config(text=f"📦 Footprint: {file_path.name}")
+            self.auto_fill_fields()
+        elif suffix in [".step", ".stp"]:
+            MODELS_DIR.mkdir(parents=True, exist_ok=True)
+            dest_3d = MODELS_DIR / file_path.name
+            shutil.copy2(file_path, dest_3d)
+            self.model_3d_file = file_path
+            self.lbl_file_status.config(text=f"🧊 3D Model Saved: {file_path.name}")
 
     def extract_zip(self, zip_path):
         self.temp_dir = tempfile.mkdtemp()
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
             zip_ref.extractall(self.temp_dir)
             
-        found_syms = list(Path(self.temp_dir).rglob("*.kicad_sym"))
-        found_fps = list(Path(self.temp_dir).rglob("*.kicad_mod"))
+        found_syms = [p for p in Path(self.temp_dir).rglob("*") if p.suffix.lower() == ".kicad_sym"]
+        found_fps = [p for p in Path(self.temp_dir).rglob("*") if p.suffix.lower() == ".kicad_mod"]
+        found_3d = [p for p in Path(self.temp_dir).rglob("*") if p.suffix.lower() in [".step", ".stp", ".wrl"]]
         
+        if found_3d:
+            MODELS_DIR.mkdir(parents=True, exist_ok=True)
+            self.model_3d_file = found_3d[0]
+            dest_3d = MODELS_DIR / self.model_3d_file.name
+            shutil.copy2(self.model_3d_file, dest_3d)
+
         if found_syms:
             self.sym_file = found_syms[0]
-            self.auto_fill_fields_from_symbol(self.sym_file)
         if found_fps:
             self.fp_file = found_fps[0]
-            
-        sym_name = self.sym_file.name if self.sym_file else "None"
-        fp_name = self.fp_file.name if self.fp_file else "None"
-        self.lbl_file_status.config(text=f"📦 ZIP: {zip_path.name}\n(Sym: {sym_name} | FP: {fp_name})")
 
-    def auto_fill_fields_from_symbol(self, sym_path):
-        content = sym_path.read_text(encoding="utf-8", errors="ignore")
-        props = {}
-        for match in re.finditer(r'\(property "([^"]+)" "([^"]*)"', content):
-            k, v = match.group(1), match.group(2)
-            if k == "DigiKey_SKU":
-                k = "DigiKey"
-            props[k] = v
+        self.auto_fill_fields()
+
+    def auto_fill_fields(self):
+        fp_name = None
+        if self.fp_file:
+            fp_name = self.fp_file.stem
             
+        sym_content = ""
+        sym_name = None
+        if self.sym_file:
+            try:
+                with open(self.sym_file, 'r', encoding='utf-8', errors='ignore') as f:
+                    sym_content = f.read()
+                syms = extract_top_symbols(sym_content)
+                if syms:
+                    sym_name = syms[0][0]
+                    sym_text = syms[0][1]
+                else:
+                    sym_text = sym_content
+            except Exception as e:
+                sym_text = ""
+        else:
+            sym_text = ""
+
+        if sym_text:
+            data = autofill_component_data(sym_text, sym_name=sym_name, fp_name=fp_name)
+        else:
+            data = {}
+
+        # Set category if predicted
+        if data.get("Category") and data["Category"] in CATEGORIES:
+            self.selected_category.set(data["Category"])
+
+        # Populate form entries
         for key, entry in self.entries.items():
-            if key in props and props[key]:
+            val = data.get(key, "")
+            if val:
                 entry.delete(0, tk.END)
-                entry.insert(0, props[key])
+                entry.insert(0, val)
+
+        # Status summary
+        sym_label = self.sym_file.name if self.sym_file else "None"
+        fp_label = self.fp_file.name if self.fp_file else "None"
+        models_label = f" | 3D: {self.model_3d_file.name}" if self.model_3d_file else ""
+        autofilled_count = len(data.get("Autofilled_Fields", []))
+        self.lbl_file_status.config(
+            text=f"📄 Sym: {sym_label} | 📦 FP: {fp_label}{models_label}\n"
+                 f"✨ Autofilled {autofilled_count} fields | Category: {self.selected_category.get()}"
+        )
 
     def init_seen_downloads(self):
         if DOWNLOADS_DIR.exists():
@@ -361,48 +417,30 @@ class ImportPartDialog:
             target_pretty.mkdir(parents=True, exist_ok=True)
             dest_fp = target_pretty / self.fp_file.name
             shutil.copy2(self.fp_file, dest_fp)
-            field_values["Footprint"] = f"rov_{category.lower()}:{self.fp_file.stem}"
+            fp_ref = f"rov_{category.lower()}:{self.fp_file.stem}"
+            field_values["Footprint"] = fp_ref
 
-        # Parse and inject symbol
+        # Read and extract symbol
         with open(self.sym_file, 'r', encoding='utf-8', errors='ignore') as f:
             sym_content = f.read()
 
-        # Extract top level symbol block
-        sym_match = re.search(r'\n\s*\(symbol\s+"([^"]+)".*?\n  \)', sym_content, re.DOTALL)
-        if not sym_match:
-            # Try matching full symbol
-            sym_match = re.search(r'\(symbol\s+"([^"]+)".*\)', sym_content, re.DOTALL)
-
-        if not sym_match:
-            messagebox.showerror("Error", "Could not parse valid symbol block from file!")
+        syms = extract_top_symbols(sym_content)
+        if not syms:
+            messagebox.showerror("Error", "Could not parse a valid top-level symbol from the file!")
             return
 
-        raw_sym = sym_match.group(0)
-        sym_name = sym_match.group(1)
+        sym_name, raw_sym, _, _ = syms[0]
 
-        # Inject properties
-        for k, v in field_values.items():
-            if v:
-                prop_str = f'\n    (property "{k}" "{v}" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))'
-                raw_sym = re.sub(rf'\(property "{k}" "[^"]*"[^\)]*\)', '', raw_sym)
-                # Insert after value property
-                val_m = re.search(r'\(property "Value" "[^"]*"[^\)]*\)', raw_sym)
-                if val_m:
-                    idx = val_m.end()
-                    raw_sym = raw_sym[:idx] + prop_str + raw_sym[idx:]
-                else:
-                    first_line = raw_sym.find('\n')
-                    raw_sym = raw_sym[:first_line] + prop_str + raw_sym[first_line:]
-
-        # Save to category file
+        # Robustly update/inject properties
         try:
-            LibraryParser.insert_symbol(category, raw_sym)
+            updated_sym = update_or_inject_properties(raw_sym, field_values)
+            LibraryParser.insert_symbol(category, updated_sym)
             messagebox.showinfo("Success", f"Component '{sym_name}' successfully added to {category} library!")
             self.dialog.destroy()
             if self.callback_on_imported:
                 self.callback_on_imported()
         except Exception as e:
-            messagebox.showerror("Import Error", f"Failed to save symbol to library: {e}")
+            messagebox.showerror("Import Error", f"Failed to save symbol to library:\n{e}")
 
 
 class LibraryManagerApp:

@@ -26,95 +26,53 @@ import argparse
 from pathlib import Path
 import subprocess
 
+# Add script directory to sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from kicad_sym_utils import (
+    validate_sexpr,
+    extract_top_symbols,
+    parse_symbol_properties,
+    update_or_inject_properties,
+    autofill_component_data,
+    clean_symbol_lib_file,
+    CATEGORIES as ALLOWED_CATEGORIES
+)
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 SYMBOLS_DIR = BASE_DIR / "Symbols"
 FOOTPRINTS_DIR = BASE_DIR / "Footprints"
-
-ALLOWED_CATEGORIES = ["Passives", "Power", "Logic", "Connectors", "Sensors", "Mech"]
 MANDATORY_FIELDS = ["MPN", "Manufacturer", "Datasheet", "Temp_Range", "DigiKey", "Category"]
 
 def parse_existing_properties(sym_str):
-    props = {}
-    for match in re.finditer(r'\(property "([^"]+)" "([^"]*)"', sym_str):
-        name, val = match.group(1), match.group(2)
-        if name == "DigiKey_SKU":
-            name = "DigiKey"
-        props[name] = val
+    props, _ = parse_symbol_properties(sym_str)
     return props
 
 def inject_or_update_properties(sym_str, field_updates, next_id_start=10):
-    lines = sym_str.split('\n')
-    existing_props = parse_existing_properties(sym_str)
-    
-    ids = [int(m) for m in re.findall(r'\(id\s+(\d+)\)', sym_str)]
-    next_id = max(ids) + 1 if ids else next_id_start
-    
-    for field, value in field_updates.items():
-        if not value:
-            continue
-            
-        # If field exists, update it in place
-        pattern = re.compile(rf'(\(property "{re.escape(field)}"\s+")[^"]*(")', re.IGNORECASE)
-        if pattern.search(sym_str):
-            sym_str = pattern.sub(rf'\g<1>{value}\g<2>', sym_str)
-        else:
-            # Inject new property right after symbol declaration line or first property
-            indent = "    "
-            new_prop = f'{indent}(property "{field}" "{value}" (id {next_id}) (at 0 0 0)\n{indent}  (effects (font (size 1.27 1.27)) hide)\n{indent})'
-            next_id += 1
-            
-            # Find insertion point after initial symbol line or existing property
-            insert_idx = 1
-            l_list = sym_str.split('\n')
-            for idx, l in enumerate(l_list):
-                if re.search(r'^\s*\(property\s', l):
-                    insert_idx = idx
-                    break
-            l_list.insert(insert_idx, new_prop)
-            sym_str = '\n'.join(l_list)
-            
-    return sym_str
+    return update_or_inject_properties(sym_str, field_updates, next_id_start=next_id_start)
 
 def extract_symbols_from_file(sym_filepath):
-    with open(sym_filepath, 'r', encoding='utf-8') as f:
+    with open(sym_filepath, 'r', encoding='utf-8', errors='ignore') as f:
         content = f.read()
-        
-    lines = content.split('\n')
-    symbols = []
-    current_symbol_lines = []
-    paren_depth = 0
-    in_symbol = False
-    
-    for line in lines:
-        if not in_symbol:
-            if re.match(r'^\s*\(symbol\s', line):
-                in_symbol = True
-                current_symbol_lines = [line]
-                paren_depth = line.count('(') - line.count(')')
-        else:
-            current_symbol_lines.append(line)
-            paren_depth += line.count('(') - line.count(')')
-            if paren_depth == 0:
-                symbols.append('\n'.join(current_symbol_lines))
-                in_symbol = False
-                
-    return symbols
+    return [s[1] for s in extract_top_symbols(content)]
 
 def append_symbol_to_category(cat, sym_block):
     target_sym_file = SYMBOLS_DIR / f"rov_{cat.lower()}.kicad_sym"
     if not target_sym_file.exists():
-        # Create empty library header if file doesn't exist
-        header = '(kicad_symbol_lib (version 20211014) (generator kicad_symbol_editor)\n'
-        footer = ')\n'
-        target_sym_file.write_text(header + footer, encoding='utf-8')
+        target_sym_file.write_text('(kicad_symbol_lib\n  (version 20211014)\n  (generator "kicad_symbol_editor")\n)\n', encoding='utf-8')
         
+    clean_symbol_lib_file(target_sym_file)
     content = target_sym_file.read_text(encoding='utf-8').rstrip()
     
-    # Remove final closing parenthesis, append symbol, then re-add closing parenthesis
-    if content.endswith(')'):
-        content = content[:-1].rstrip()
+    last_paren = content.rfind(')')
+    if last_paren != -1:
+        new_content = content[:last_paren].rstrip() + "\n  " + sym_block.strip() + "\n)\n"
+    else:
+        new_content = content + "\n  " + sym_block.strip() + "\n)\n"
         
-    new_content = content + "\n" + sym_block.strip() + "\n)\n"
+    is_valid, err = validate_sexpr(new_content)
+    if not is_valid:
+        raise ValueError(f"Failed to generate valid S-expression for {cat}: {err}")
+        
     target_sym_file.write_text(new_content, encoding='utf-8')
     print(f"✅ Added symbol to: {target_sym_file}")
 
@@ -141,36 +99,44 @@ def interactive_mode():
     if fp_path and not os.path.exists(fp_path):
         print("⚠️ Footprint file not found, proceeding without footprint copy.")
         fp_path = None
-        
-    print("\nSelect Component Category:")
-    for idx, cat in enumerate(ALLOWED_CATEGORIES, 1):
-        print(f"  {idx}. {cat}")
-    cat_idx = input("Enter choice (1-6): ").strip()
-    while not (cat_idx.isdigit() and 1 <= int(cat_idx) <= len(ALLOWED_CATEGORIES)):
-        cat_idx = input("Invalid choice. Enter choice (1-6): ").strip()
-    category = ALLOWED_CATEGORIES[int(cat_idx) - 1]
-    
+
     symbols = extract_symbols_from_file(sym_path)
     if not symbols:
         print("❌ No symbols found in file!")
         sys.exit(1)
         
     sym_block = symbols[0]
-    existing_props = parse_existing_properties(sym_block)
+    fp_name_guess = Path(fp_path).stem if fp_path else None
+    autofilled = autofill_component_data(sym_block, fp_name=fp_name_guess)
     
-    print("\nProvide Component Fields (Press Enter to keep existing / auto-detected):")
-    mpn = input(f"  MPN [{existing_props.get('MPN', '')}]: ").strip() or existing_props.get('MPN', '')
-    mfr = input(f"  Manufacturer [{existing_props.get('Manufacturer', '')}]: ").strip() or existing_props.get('Manufacturer', '')
-    datasheet = input(f"  Datasheet URL [{existing_props.get('Datasheet', '')}]: ").strip() or existing_props.get('Datasheet', '')
-    digikey = input(f"  DigiKey Part # [{existing_props.get('DigiKey', '')}]: ").strip() or existing_props.get('DigiKey', '')
-    temp = input(f"  Temp Range [{existing_props.get('Temp_Range', '-40°C to 125°C')}]: ").strip() or existing_props.get('Temp_Range', '-40°C to 125°C')
+    print("\nSelect Component Category:")
+    default_cat_idx = 1
+    for idx, cat in enumerate(ALLOWED_CATEGORIES, 1):
+        marker = " (Detected)" if cat == autofilled.get("Category") else ""
+        if cat == autofilled.get("Category"):
+            default_cat_idx = idx
+        print(f"  {idx}. {cat}{marker}")
+    cat_idx = input(f"Enter choice (1-6) [{default_cat_idx}]: ").strip()
+    if not cat_idx:
+        category = ALLOWED_CATEGORIES[default_cat_idx - 1]
+    elif cat_idx.isdigit() and 1 <= int(cat_idx) <= len(ALLOWED_CATEGORIES):
+        category = ALLOWED_CATEGORIES[int(cat_idx) - 1]
+    else:
+        category = autofilled.get("Category", "Power")
+    
+    print(f"\nProvide Component Fields (Press Enter to keep detected values):")
+    mpn = input(f"  MPN [{autofilled.get('MPN', '')}]: ").strip() or autofilled.get('MPN', '')
+    mfr = input(f"  Manufacturer [{autofilled.get('Manufacturer', '')}]: ").strip() or autofilled.get('Manufacturer', '')
+    datasheet = input(f"  Datasheet URL [{autofilled.get('Datasheet', '')}]: ").strip() or autofilled.get('Datasheet', '')
+    digikey = input(f"  DigiKey Part # [{autofilled.get('DigiKey', '')}]: ").strip() or autofilled.get('DigiKey', '')
+    temp = input(f"  Temp Range [{autofilled.get('Temp_Range', '-40°C to 125°C')}]: ").strip() or autofilled.get('Temp_Range', '-40°C to 125°C')
 
     fp_name = None
     if fp_path:
         fp_name = copy_footprint_to_category(category, fp_path)
         fp_ref = f"rov_{category.lower()}:{fp_name}"
     else:
-        fp_ref = existing_props.get('Footprint', '')
+        fp_ref = autofilled.get('Footprint', '')
         
     field_updates = {
         "Category": category,
@@ -227,10 +193,10 @@ def main():
         sys.exit(1)
         
     sym_block = symbols[0]
-    existing_props = parse_existing_properties(sym_block)
+    autofilled = autofill_component_data(sym_block)
     
-    category = args.category or "Mech"
-    fp_ref = existing_props.get("Footprint", "")
+    category = args.category or autofilled.get("Category", "Mech")
+    fp_ref = autofilled.get("Footprint", "")
     
     if args.footprint and os.path.exists(args.footprint):
         fp_name = copy_footprint_to_category(category, args.footprint)
@@ -238,11 +204,11 @@ def main():
         
     field_updates = {
         "Category": category,
-        "MPN": args.mpn or existing_props.get("MPN", ""),
-        "Manufacturer": args.mfr or existing_props.get("Manufacturer", ""),
-        "Datasheet": args.datasheet or existing_props.get("Datasheet", ""),
-        "DigiKey": args.digikey or existing_props.get("DigiKey", ""),
-        "Temp_Range": args.temp or existing_props.get("Temp_Range", "-40°C to 125°C"),
+        "MPN": args.mpn or autofilled.get("MPN", ""),
+        "Manufacturer": args.mfr or autofilled.get("Manufacturer", ""),
+        "Datasheet": args.datasheet or autofilled.get("Datasheet", ""),
+        "DigiKey": args.digikey or autofilled.get("DigiKey", ""),
+        "Temp_Range": args.temp or autofilled.get("Temp_Range", "-40°C to 125°C"),
         "Footprint": fp_ref
     }
     
