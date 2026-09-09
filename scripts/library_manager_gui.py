@@ -6,6 +6,16 @@ All-in-one visual dashboard: Browse, search, edit, add, import (ZIP/sym/mod), de
 
 import os
 import sys
+from pathlib import Path
+
+# Add script directory for imports and check dependencies
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from dependency_check import ensure_dependencies
+
+# Verify critical GUI and network libraries, prompt/auto-install if missing
+if not ensure_dependencies({"tkinter": None, "requests": "requests"}, prompt_if_missing=True):
+    sys.exit(1)
+
 import re
 import zipfile
 import shutil
@@ -16,10 +26,7 @@ import tempfile
 import webbrowser
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-from pathlib import Path
 
-# Add script directory for imports
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 from kicad_sym_utils import (
     validate_sexpr,
     extract_top_symbols,

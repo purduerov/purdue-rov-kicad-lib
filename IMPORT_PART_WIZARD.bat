@@ -1,5 +1,5 @@
 @echo off
-title Purdue ROV - KiCad Central Library Manager
+title Purdue ROV KiCad Part Importer Wizard
 setlocal enabledelayedexpansion
 
 :: 1. Check if Python is installed
@@ -21,10 +21,10 @@ if %ERRORLEVEL% NEQ 0 (
     set "PY_CMD=python"
 )
 
-:: 2. Launch Library Manager (dependency_check will auto-prompt for any missing libraries)
-%PY_CMD% "%~dp0scripts\library_manager_gui.py"
+:: 2. Launch Part Importer (dependency_check will auto-prompt for any missing libraries)
+%PY_CMD% "%~dp0scripts\part_importer_gui.py"
 if %ERRORLEVEL% NEQ 0 (
     echo.
-    echo Library Manager exited with an error.
+    echo Part Importer Wizard exited with an error.
     pause
 )

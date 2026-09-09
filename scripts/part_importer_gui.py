@@ -6,17 +6,25 @@ Drag & Drop / Auto-Watch Downloads Folder for 1-Click Part Importing into standa
 
 import os
 import sys
+from pathlib import Path
+
+# Add script directory for imports and check dependencies
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from dependency_check import ensure_dependencies
+
+# Verify critical GUI and network libraries, prompt/auto-install if missing
+if not ensure_dependencies({"tkinter": None, "requests": "requests"}, prompt_if_missing=True):
+    sys.exit(1)
+
 import re
 import zipfile
 import shutil
 import subprocess
 import threading
 import time
-from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 from kicad_sym_utils import autofill_component_data
 
 BASE_DIR = Path(__file__).resolve().parent.parent
