@@ -25,7 +25,11 @@ import time
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
-from kicad_sym_utils import autofill_component_data
+from kicad_sym_utils import (
+    autofill_component_data,
+    get_standard_passive_symbol,
+    link_3d_model_to_footprint
+)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 SYMBOLS_DIR = BASE_DIR / "Symbols"
@@ -48,6 +52,7 @@ class PartImporterApp:
 
         self.sym_file = None
         self.fp_file = None
+        self.model_3d_file = None
         self.temp_dir = None
         self.watcher_running = False
         self.seen_downloads = set()
@@ -97,11 +102,27 @@ class PartImporterApp:
         for cat in ALLOWED_CATEGORIES:
             rb = tk.Radiobutton(cat_frame, text=cat, value=cat, variable=self.selected_category,
                                 bg="#1e1e2e", fg="#cdd6f4", selectcolor="#313244", activebackground="#1e1e2e",
-                                activeforeground="#cba6f7", font=("Segoe UI", 10))
+                                activeforeground="#cba6f7", font=("Segoe UI", 10),
+                                command=self.on_category_changed)
             rb.pack(side=tk.LEFT, padx=5)
 
+        # Passive Symbol Type Sub-selector
+        self.passive_frame = ttk.Frame(main_frame)
+        ttk.Label(self.passive_frame, text="Passive Symbol Type:", font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT, padx=(0, 5))
+        self.passive_type_var = tk.StringVar(value="R (Resistor)")
+        self.passive_type_combo = ttk.Combobox(
+            self.passive_frame,
+            textvariable=self.passive_type_var,
+            values=["R (Resistor)", "C (Capacitor)", "C_Polarized (Polarized Cap)", "L (Inductor)", "L_Ferrite (Ferrite Bead)"],
+            state="readonly",
+            width=26
+        )
+        self.passive_type_combo.pack(side=tk.LEFT, padx=5)
+        ttk.Label(self.passive_frame, text="(Uses standard KiCad Device symbol)", font=("Segoe UI", 9, "italic")).pack(side=tk.LEFT, padx=5)
+
         # Fields Frame
-        fields_frame = ttk.Frame(main_frame)
+        self.fields_frame = ttk.Frame(main_frame)
+        fields_frame = self.fields_frame
         fields_frame.pack(fill=tk.X, pady=(0, 15))
 
         self.entries = {}
@@ -143,21 +164,28 @@ class PartImporterApp:
     def browse_files(self):
         file_path = filedialog.askopenfilename(
             title="Select KiCad Part or ZIP",
-            filetypes=[("KiCad Files & ZIPs", "*.kicad_sym *.kicad_mod *.zip"), ("All Files", "*.*")]
+            filetypes=[("KiCad Files & ZIPs", "*.kicad_sym *.kicad_mod *.zip *.step *.stp"), ("All Files", "*.*")]
         )
         if file_path:
             self.load_file(Path(file_path))
 
     def load_file(self, file_path):
-        if file_path.suffix.lower() == ".zip":
+        suffix = file_path.suffix.lower()
+        if suffix == ".zip":
             self.extract_zip(file_path)
-        elif file_path.suffix.lower() == ".kicad_sym":
+        elif suffix == ".kicad_sym":
             self.sym_file = file_path
             self.lbl_file_status.config(text=f"📄 Symbol: {file_path.name}")
             self.auto_fill_fields_from_symbol(file_path)
-        elif file_path.suffix.lower() == ".kicad_mod":
+        elif suffix == ".kicad_mod":
             self.fp_file = file_path
             self.lbl_file_status.config(text=f"📦 Footprint: {file_path.name}")
+        elif suffix in [".step", ".stp"]:
+            models_dir = BASE_DIR / "3D_Models"
+            models_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(file_path, models_dir / file_path.name)
+            self.model_3d_file = file_path
+            self.lbl_file_status.config(text=f"🧊 3D Model Saved: {file_path.name}")
 
     def extract_zip(self, zip_path):
         import tempfile
@@ -167,6 +195,13 @@ class PartImporterApp:
             
         found_syms = list(Path(self.temp_dir).rglob("*.kicad_sym"))
         found_fps = list(Path(self.temp_dir).rglob("*.kicad_mod"))
+        found_3d = [p for p in Path(self.temp_dir).rglob("*") if p.suffix.lower() in [".step", ".stp", ".wrl"]]
+
+        if found_3d:
+            models_dir = BASE_DIR / "3D_Models"
+            models_dir.mkdir(parents=True, exist_ok=True)
+            self.model_3d_file = found_3d[0]
+            shutil.copy2(self.model_3d_file, models_dir / self.model_3d_file.name)
         
         if found_syms:
             self.sym_file = found_syms[0]
@@ -176,7 +211,8 @@ class PartImporterApp:
             
         sym_name = self.sym_file.name if self.sym_file else "None"
         fp_name = self.fp_file.name if self.fp_file else "None"
-        self.lbl_file_status.config(text=f"📦 ZIP: {zip_path.name}\n(Sym: {sym_name} | FP: {fp_name})")
+        models_label = f" | 3D: {self.model_3d_file.name}" if self.model_3d_file else ""
+        self.lbl_file_status.config(text=f"📦 ZIP: {zip_path.name}\n(Sym: {sym_name} | FP: {fp_name}{models_label})")
 
     def auto_fill_fields_from_symbol(self, sym_path):
         content = sym_path.read_text(encoding="utf-8", errors="ignore")
@@ -185,6 +221,7 @@ class PartImporterApp:
         
         if data.get("Category") and data["Category"] in ALLOWED_CATEGORIES:
             self.selected_category.set(data["Category"])
+        self.on_category_changed()
             
         for key, entry in self.entries.items():
             val = data.get(key, "")
@@ -227,14 +264,22 @@ class PartImporterApp:
         messagebox.showinfo("New Part Downloaded!", f"Detected new part in Downloads:\n{file_path.name}")
         self.load_file(file_path)
 
+    def on_category_changed(self):
+        cat = self.selected_category.get()
+        if cat == "Passives":
+            self.passive_frame.pack(fill=tk.X, pady=(0, 10), before=self.fields_frame)
+        else:
+            self.passive_frame.pack_forget()
+
     def process_import(self):
-        if not self.sym_file:
+        category = self.selected_category.get()
+        field_values = {k: v.get().strip() for k, v in self.entries.items()}
+        field_values["Category"] = category
+
+        if category != "Passives" and not self.sym_file:
             messagebox.showerror("Error", "Please select or drop a valid .kicad_sym or .zip file!")
             return
             
-        category = self.selected_category.get()
-        field_values = {k: v.get().strip() for k, v in self.entries.items()}
-        
         # Import using backend logic
         try:
             from import_part import extract_symbols_from_file, inject_or_update_properties, copy_footprint_to_category, append_symbol_to_category
@@ -242,18 +287,33 @@ class PartImporterApp:
             sys.path.append(str(BASE_DIR / "scripts"))
             from import_part import extract_symbols_from_file, inject_or_update_properties, copy_footprint_to_category, append_symbol_to_category
 
-        symbols = extract_symbols_from_file(self.sym_file)
-        if not symbols:
-            messagebox.showerror("Error", "No valid symbols found in symbol file!")
-            return
-
-        sym_block = symbols[0]
+        # 1. Copy footprint & link 3D model
         if self.fp_file:
             fp_name = copy_footprint_to_category(category, self.fp_file)
+            target_fp = FOOTPRINTS_DIR / f"rov_{category.lower()}.pretty" / self.fp_file.name
+            if self.model_3d_file:
+                link_3d_model_to_footprint(target_fp, self.model_3d_file.name)
             field_values["Footprint"] = f"rov_{category.lower()}:{fp_name}"
-            
-        field_values["Category"] = category
-        updated_sym = inject_or_update_properties(sym_block, field_values)
+
+        # 2. Build or extract symbol
+        if category == "Passives":
+            raw_ptype = self.passive_type_var.get().split()[0]
+            sym_name = field_values.get("MPN") or (self.fp_file.stem if self.fp_file else "PASSIVE_PART")
+            try:
+                updated_sym = get_standard_passive_symbol(raw_ptype, sym_name, field_values)
+            except Exception as e:
+                messagebox.showerror("Passive Symbol Error", f"Failed to generate standard KiCad passive symbol:\n{e}")
+                return
+        else:
+            symbols = extract_symbols_from_file(self.sym_file)
+            if not symbols:
+                messagebox.showerror("Error", "No valid symbols found in symbol file!")
+                return
+
+            sym_block = symbols[0]
+            sym_name = field_values.get("MPN", "Component")
+            updated_sym = inject_or_update_properties(sym_block, field_values)
+
         append_symbol_to_category(category, updated_sym)
 
         # Run Linter
@@ -262,11 +322,11 @@ class PartImporterApp:
         
         if res.returncode == 0:
             # Commit & Push
-            subprocess.run(["git", "add", "Symbols/", "Footprints/"], cwd=str(BASE_DIR))
+            subprocess.run(["git", "add", "Symbols/", "Footprints/", "3D_Models/"], cwd=str(BASE_DIR))
             subprocess.run(["git", "commit", "-m", f"feat(lib): add {field_values.get('MPN', 'new part')} to {category} library"], cwd=str(BASE_DIR))
             subprocess.run(["git", "push", "origin", "master"], cwd=str(BASE_DIR))
             
-            messagebox.showinfo("Success 🎉", f"Part '{field_values.get('MPN', 'Component')}' successfully added to {category} library and pushed to master!")
+            messagebox.showinfo("Success 🎉", f"Part '{field_values.get('MPN', sym_name)}' successfully added to {category} library and pushed to master!")
             self.lbl_status.config(text="✅ Import complete & pushed to master!")
         else:
             messagebox.showwarning("Linter Warning", "Part added, but linter failed. Check missing mandatory fields.")

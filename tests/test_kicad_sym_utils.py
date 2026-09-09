@@ -154,5 +154,67 @@ class TestKiCadSymUtils(unittest.TestCase):
         for k, v in updates.items():
             self.assertEqual(props.get(k), v, f"Property {k} mismatch")
 
+    def test_get_standard_passive_symbol(self):
+        props = {
+            "MPN": "CRCW080510K0FKEA",
+            "Manufacturer": "Vishay Dale",
+            "Datasheet": "https://www.vishay.com/docs/20035/dcrcwe3.pdf",
+            "DigiKey": "541-10.0KCCT-ND",
+            "Temp_Range": "-55°C to 155°C",
+            "Footprint": "rov_passives:R_0805_2012Metric",
+            "Description": "RES 10K OHM 1% 1/8W 0805"
+        }
+        res_sym = kicad_sym_utils.get_standard_passive_symbol("R", "CRCW080510K0FKEA", props)
+        
+        is_valid, err = kicad_sym_utils.validate_sexpr(res_sym)
+        self.assertTrue(is_valid, f"Generated standard passive symbol S-expr invalid: {err}")
+        self.assertIn('(symbol "CRCW080510K0FKEA"', res_sym)
+        self.assertIn('(symbol "CRCW080510K0FKEA_0_1"', res_sym)
+        self.assertIn('(symbol "CRCW080510K0FKEA_1_1"', res_sym)
+
+        parsed_props, _ = kicad_sym_utils.parse_symbol_properties(res_sym)
+        self.assertEqual(parsed_props.get("MPN"), "CRCW080510K0FKEA")
+        self.assertEqual(parsed_props.get("Manufacturer"), "Vishay Dale")
+        self.assertEqual(parsed_props.get("Category"), "Passives")
+        self.assertEqual(parsed_props.get("Footprint"), "rov_passives:R_0805_2012Metric")
+        self.assertEqual(parsed_props.get("Reference"), "R")
+
+        # Test Capacitor
+        cap_props = dict(props, MPN="GRM188R71C104KA01D")
+        cap_sym = kicad_sym_utils.get_standard_passive_symbol("C", "GRM188R71C104KA01D", cap_props)
+        is_valid, err = kicad_sym_utils.validate_sexpr(cap_sym)
+        self.assertTrue(is_valid)
+        self.assertIn('(symbol "GRM188R71C104KA01D"', cap_sym)
+        parsed_cap_props, _ = kicad_sym_utils.parse_symbol_properties(cap_sym)
+        self.assertEqual(parsed_cap_props.get("Reference"), "C")
+
+    def test_link_3d_model_to_footprint(self):
+        import tempfile
+        sample_mod_without_3d = """(footprint "R_0805_2012Metric"
+  (version 20240108)
+  (generator "kicad_footprint_editor")
+  (layer "F.Cu")
+  (pad "1" smd roundrect (at -0.95 0) (size 1 1.45) (layers "F.Cu" "F.Paste" "F.Mask"))
+  (pad "2" smd roundrect (at 0.95 0) (size 1 1.45) (layers "F.Cu" "F.Paste" "F.Mask"))
+)"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fp_path = Path(tmpdir) / "test.kicad_mod"
+            fp_path.write_text(sample_mod_without_3d, encoding="utf-8")
+
+            success = kicad_sym_utils.link_3d_model_to_footprint(fp_path, "resistor_0805.step")
+            self.assertTrue(success)
+
+            content = fp_path.read_text(encoding="utf-8")
+            self.assertIn('(model "${KIPRJMOD}/libs/purdue-rov-kicad-lib/3D_Models/resistor_0805.step"', content)
+            valid, err = kicad_sym_utils.validate_sexpr(content)
+            self.assertTrue(valid, f"Footprint S-expr corrupted: {err}")
+
+            # Test updating existing model path
+            success_update = kicad_sym_utils.link_3d_model_to_footprint(fp_path, "resistor_0805_v2.step")
+            self.assertTrue(success_update)
+            content_updated = fp_path.read_text(encoding="utf-8")
+            self.assertIn('(model "${KIPRJMOD}/libs/purdue-rov-kicad-lib/3D_Models/resistor_0805_v2.step"', content_updated)
+            self.assertNotIn('resistor_0805.step"', content_updated)
+
 if __name__ == "__main__":
     unittest.main()

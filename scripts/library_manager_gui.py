@@ -34,6 +34,8 @@ from kicad_sym_utils import (
     update_or_inject_properties,
     autofill_component_data,
     clean_symbol_lib_file,
+    get_standard_passive_symbol,
+    link_3d_model_to_footprint,
     CATEGORIES,
     CATEGORY_KEYWORDS
 )
@@ -242,11 +244,27 @@ class ImportPartDialog:
         for cat in CATEGORIES:
             rb = tk.Radiobutton(cat_frame, text=cat, value=cat, variable=self.selected_category,
                                 bg="#1e1e2e", fg="#cdd6f4", selectcolor="#313244", activebackground="#1e1e2e",
-                                activeforeground="#cba6f7", font=("Segoe UI", 9))
+                                activeforeground="#cba6f7", font=("Segoe UI", 9),
+                                command=self.on_category_changed)
             rb.pack(side=tk.LEFT, padx=4)
 
+        # Passive Symbol Type Sub-selector (for standard KiCad Device symbols)
+        self.passive_frame = ttk.Frame(main_frame, style="Surface.TFrame")
+        ttk.Label(self.passive_frame, text="Passive Symbol Type:", style="Surface.TLabel", font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT, padx=(0, 5))
+        self.passive_type_var = tk.StringVar(value="R (Resistor)")
+        self.passive_type_combo = ttk.Combobox(
+            self.passive_frame,
+            textvariable=self.passive_type_var,
+            values=["R (Resistor)", "C (Capacitor)", "C_Polarized (Polarized Cap)", "L (Inductor)", "L_Ferrite (Ferrite Bead)"],
+            state="readonly",
+            width=26
+        )
+        self.passive_type_combo.pack(side=tk.LEFT, padx=5)
+        ttk.Label(self.passive_frame, text="(Uses standard KiCad Device symbol with your custom footprint & 3D STEP)", style="Muted.TLabel").pack(side=tk.LEFT, padx=5)
+
         # Fields Form
-        fields_frame = ttk.Frame(main_frame, style="Surface.TFrame")
+        self.fields_frame = ttk.Frame(main_frame, style="Surface.TFrame")
+        fields_frame = self.fields_frame
         fields_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
         self.entries = {}
@@ -360,6 +378,7 @@ class ImportPartDialog:
         # Set category if predicted
         if data.get("Category") and data["Category"] in CATEGORIES:
             self.selected_category.set(data["Category"])
+        self.on_category_changed()
 
         # Populate form entries
         for key, entry in self.entries.items():
@@ -409,38 +428,68 @@ class ImportPartDialog:
         messagebox.showinfo("New Part Downloaded!", f"Detected new part in Downloads:\n{file_path.name}")
         self.load_file(file_path)
 
+    def on_category_changed(self):
+        cat = self.selected_category.get()
+        if cat == "Passives":
+            self.passive_frame.pack(fill=tk.X, pady=(0, 10), before=self.fields_frame)
+        else:
+            self.passive_frame.pack_forget()
+
     def process_import(self):
-        if not self.sym_file:
-            messagebox.showerror("Error", "Please select or drop a valid .kicad_sym or .zip file!")
-            return
-            
         category = self.selected_category.get()
         field_values = {k: v.get().strip() for k, v in self.entries.items()}
         field_values["Category"] = category
 
-        # Copy footprint if present
+        # For Passives, symbol file is optional because we use standard KiCad Device symbols
+        if category != "Passives" and not self.sym_file:
+            messagebox.showerror("Error", "Please select or drop a valid .kicad_sym or .zip file!")
+            return
+
+        # 1. Copy footprint if present & link 3D model
         if self.fp_file:
             target_pretty = FOOTPRINTS_DIR / f"rov_{category.lower()}.pretty"
             target_pretty.mkdir(parents=True, exist_ok=True)
             dest_fp = target_pretty / self.fp_file.name
             shutil.copy2(self.fp_file, dest_fp)
+
+            # If 3D model was uploaded, link it inside the footprint
+            if self.model_3d_file:
+                link_3d_model_to_footprint(dest_fp, self.model_3d_file.name)
+
             fp_ref = f"rov_{category.lower()}:{self.fp_file.stem}"
             field_values["Footprint"] = fp_ref
 
-        # Read and extract symbol
-        with open(self.sym_file, 'r', encoding='utf-8', errors='ignore') as f:
-            sym_content = f.read()
+        # 2. Build or extract symbol
+        if category == "Passives":
+            # For passives, generate symbol from official KiCad standard Device symbol
+            raw_ptype = self.passive_type_var.get().split()[0] # e.g. 'R', 'C', 'C_Polarized', 'L', 'L_Ferrite'
+            sym_name = field_values.get("MPN") or (self.fp_file.stem if self.fp_file else "PASSIVE_PART")
+            try:
+                updated_sym = get_standard_passive_symbol(raw_ptype, sym_name, field_values)
+            except Exception as e:
+                messagebox.showerror("Passive Symbol Error", f"Failed to generate standard KiCad passive symbol:\n{e}")
+                return
+        else:
+            # Read and extract uploaded symbol
+            with open(self.sym_file, 'r', encoding='utf-8', errors='ignore') as f:
+                sym_content = f.read()
 
-        syms = extract_top_symbols(sym_content)
-        if not syms:
-            messagebox.showerror("Error", "Could not parse a valid top-level symbol from the file!")
-            return
+            syms = extract_top_symbols(sym_content)
+            if not syms:
+                messagebox.showerror("Error", "Could not parse a valid top-level symbol from the file!")
+                return
 
-        sym_name, raw_sym, _, _ = syms[0]
+            sym_name, raw_sym, _, _ = syms[0]
 
-        # Robustly update/inject properties
+            # Robustly update/inject properties
+            try:
+                updated_sym = update_or_inject_properties(raw_sym, field_values)
+            except Exception as e:
+                messagebox.showerror("Property Error", f"Failed to inject properties into symbol:\n{e}")
+                return
+
+        # 3. Save into category library
         try:
-            updated_sym = update_or_inject_properties(raw_sym, field_values)
             LibraryParser.insert_symbol(category, updated_sym)
             messagebox.showinfo("Success", f"Component '{sym_name}' successfully added to {category} library!")
             self.dialog.destroy()

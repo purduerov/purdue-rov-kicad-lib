@@ -6,6 +6,7 @@ and smart metadata autofill across various component vendor formats.
 
 import re
 import os
+import json
 import urllib.parse
 from pathlib import Path
 
@@ -532,3 +533,95 @@ def clean_symbol_lib_file(filepath):
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write(cleaned_content + '\n')
     return is_valid, err
+
+
+def get_standard_passive_symbol(passive_type, symbol_name, properties):
+    """
+    Generates a clean KiCad symbol S-expression using official standard KiCad Device templates
+    (Resistor 'R', Capacitor 'C', Polarized Capacitor 'C_Polarized', Inductor 'L', Ferrite 'L_Ferrite'),
+    renamed to symbol_name with customized properties and footprint.
+    """
+    json_path = Path(__file__).resolve().parent / "standard_passives.json"
+    if not json_path.exists():
+        raise FileNotFoundError(f"Standard passives definitions not found at {json_path}")
+
+    with open(json_path, 'r', encoding='utf-8') as f:
+        templates = json.load(f)
+
+    # Resolve template key
+    type_key = passive_type.strip()
+    if type_key not in templates:
+        # Fallback guesses
+        if type_key.upper().startswith("R"):
+            type_key = "R"
+        elif type_key.upper().startswith("CP") or "POL" in type_key.upper():
+            type_key = "C_Polarized"
+        elif type_key.upper().startswith("C"):
+            type_key = "C"
+        elif type_key.upper().startswith("FB") or "FERRITE" in type_key.upper():
+            type_key = "L_Ferrite"
+        elif type_key.upper().startswith("L"):
+            type_key = "L"
+        else:
+            type_key = "R"
+
+    base_sym = templates[type_key]
+
+    # Rename symbol header: (symbol "KEY" ... -> (symbol "symbol_name" ...
+    renamed = re.sub(r'^\(\s*symbol\s+"[^"]+"', f'(symbol "{symbol_name}"', base_sym.strip())
+    # Rename sub-units: (symbol "KEY_0_1" ... -> (symbol "symbol_name_0_1" ...
+    renamed = re.sub(r'\(\s*symbol\s+"[^"]+_([0-9]+_[0-9]+)"', rf'(symbol "{symbol_name}_\1"', renamed)
+
+    # Ensure required properties are injected
+    props_to_apply = dict(properties)
+    props_to_apply["Value"] = properties.get("MPN", symbol_name)
+    props_to_apply["Category"] = "Passives"
+
+    return update_or_inject_properties(renamed, props_to_apply)
+
+
+def link_3d_model_to_footprint(fp_filepath, model_filename):
+    """
+    Ensures a .kicad_mod footprint references its 3D model (.step/.stp)
+    using the standard relative path '${KIPRJMOD}/libs/purdue-rov-kicad-lib/3D_Models/<model_filename>'.
+    If the footprint already has a (model ...) statement, updates its path.
+    Otherwise, injects the model statement right before the closing parenthesis.
+    """
+    fp_path = Path(fp_filepath)
+    if not fp_path.exists():
+        return False
+
+    with open(fp_path, 'r', encoding='utf-8', errors='ignore') as f:
+        content = f.read().rstrip()
+
+    model_rel_path = f"${{KIPRJMOD}}/libs/purdue-rov-kicad-lib/3D_Models/{model_filename}"
+
+    # Check if a model statement already exists
+    if "(model " in content:
+        # Update existing model path
+        updated_content = re.sub(
+            r'\(model\s+"[^"]*"',
+            f'(model "{model_rel_path}"',
+            content,
+            count=1
+        )
+    else:
+        # Insert model clause before the last closing paren
+        model_block = (
+            f'\n  (model "{model_rel_path}"\n'
+            f'    (offset (xyz 0 0 0))\n'
+            f'    (scale (xyz 1 1 1))\n'
+            f'    (rotate (xyz 0 0 0))\n'
+            f'  )\n'
+        )
+        last_paren = content.rfind(')')
+        if last_paren != -1:
+            updated_content = content[:last_paren].rstrip() + model_block + ")\n"
+        else:
+            updated_content = content + model_block
+
+    with open(fp_path, 'w', encoding='utf-8') as f:
+        f.write(updated_content)
+
+    return True
+

@@ -36,6 +36,8 @@ from kicad_sym_utils import (
     update_or_inject_properties,
     autofill_component_data,
     clean_symbol_lib_file,
+    get_standard_passive_symbol,
+    link_3d_model_to_footprint,
     CATEGORIES as ALLOWED_CATEGORIES
 )
 
@@ -91,24 +93,32 @@ def interactive_mode():
     print("  Purdue ROV KiCad Library - Part Import Wizard")
     print("=" * 60)
     
-    sym_path = input("📁 Path to downloaded symbol (.kicad_sym) file: ").strip('"\' ')
-    while not os.path.exists(sym_path):
+    sym_path = input("📁 Path to downloaded symbol (.kicad_sym) file (press Enter for standard Passive): ").strip('"\' ')
+    if sym_path and not os.path.exists(sym_path):
         print("❌ File not found. Please enter a valid path.")
-        sym_path = input("📁 Path to downloaded symbol (.kicad_sym) file: ").strip('"\' ')
+        sym_path = input("📁 Path to downloaded symbol (.kicad_sym) file (press Enter for standard Passive): ").strip('"\' ')
         
-    fp_path = input("📁 Path to downloaded footprint (.kicad_mod) file (press Enter if none): ").strip('"\' ')
+    fp_path = input("📁 Path to footprint (.kicad_mod) file (press Enter if none): ").strip('"\' ')
     if fp_path and not os.path.exists(fp_path):
         print("⚠️ Footprint file not found, proceeding without footprint copy.")
         fp_path = None
 
-    symbols = extract_symbols_from_file(sym_path)
-    if not symbols:
-        print("❌ No symbols found in file!")
-        sys.exit(1)
-        
-    sym_block = symbols[0]
+    model_3d_path = input("📁 Path to 3D model (.step/.stp) file (press Enter if none): ").strip('"\' ')
+    if model_3d_path and not os.path.exists(model_3d_path):
+        print("⚠️ 3D model file not found, proceeding without 3D copy.")
+        model_3d_path = None
+
+    sym_block = None
+    if sym_path and os.path.exists(sym_path):
+        symbols = extract_symbols_from_file(sym_path)
+        if symbols:
+            sym_block = symbols[0]
+
     fp_name_guess = Path(fp_path).stem if fp_path else None
-    autofilled = autofill_component_data(sym_block, fp_name=fp_name_guess)
+    if sym_block:
+        autofilled = autofill_component_data(sym_block, fp_name=fp_name_guess)
+    else:
+        autofilled = {"Category": "Passives", "MPN": fp_name_guess or "", "Temp_Range": "-55°C to 125°C"}
     
     print("\nSelect Component Category:")
     default_cat_idx = 1
@@ -125,6 +135,18 @@ def interactive_mode():
     else:
         category = autofilled.get("Category", "Power")
     
+    passive_type = "R"
+    if category == "Passives":
+        print("\nSelect Standard KiCad Passive Symbol Type:")
+        print("  1. Resistor (R)")
+        print("  2. Capacitor (C)")
+        print("  3. Polarized Capacitor (C_Polarized)")
+        print("  4. Inductor (L)")
+        print("  5. Ferrite Bead (L_Ferrite)")
+        pt_choice = input("Enter choice (1-5) [1]: ").strip()
+        pt_map = {"1": "R", "2": "C", "3": "C_Polarized", "4": "L", "5": "L_Ferrite"}
+        passive_type = pt_map.get(pt_choice, "R")
+
     print(f"\nProvide Component Fields (Press Enter to keep detected values):")
     mpn = input(f"  MPN [{autofilled.get('MPN', '')}]: ").strip() or autofilled.get('MPN', '')
     mfr = input(f"  Manufacturer [{autofilled.get('Manufacturer', '')}]: ").strip() or autofilled.get('Manufacturer', '')
@@ -135,6 +157,12 @@ def interactive_mode():
     fp_name = None
     if fp_path:
         fp_name = copy_footprint_to_category(category, fp_path)
+        dest_fp = FOOTPRINTS_DIR / f"rov_{category.lower()}.pretty" / Path(fp_path).name
+        if model_3d_path:
+            models_dir = BASE_DIR / "3D_Models"
+            models_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(model_3d_path, models_dir / Path(model_3d_path).name)
+            link_3d_model_to_footprint(dest_fp, Path(model_3d_path).name)
         fp_ref = f"rov_{category.lower()}:{fp_name}"
     else:
         fp_ref = autofilled.get('Footprint', '')
@@ -149,7 +177,15 @@ def interactive_mode():
         "Footprint": fp_ref
     }
     
-    updated_sym = inject_or_update_properties(sym_block, field_updates)
+    if category == "Passives":
+        sym_name = mpn or fp_name or "PASSIVE_PART"
+        updated_sym = get_standard_passive_symbol(passive_type, sym_name, field_updates)
+    else:
+        if not sym_block:
+            print("❌ Active/Connector/Sensor/Power parts require an input .kicad_sym file!")
+            sys.exit(1)
+        updated_sym = inject_or_update_properties(sym_block, field_updates)
+
     append_symbol_to_category(category, updated_sym)
     
     print("\n🔍 Running Linter Verification...")
