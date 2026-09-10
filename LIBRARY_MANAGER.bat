@@ -1,8 +1,9 @@
 @echo off
+chcp 65001 >nul 2>&1
 title Purdue ROV - KiCad Central Library Manager
 setlocal enabledelayedexpansion
 
-:: 1. Check if Python is installed
+REM 1. Check if Python is installed
 where python >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
     where py >nul 2>&1
@@ -11,7 +12,7 @@ if %ERRORLEVEL% NEQ 0 (
     ) else (
         echo ====================================================================
         echo [ERROR] Python was not found on your system!
-        echo Please install Python 3 (with tkinter enabled) from python.org
+        echo Please install Python 3 with tkinter enabled from python.org
         echo or from the Microsoft Store.
         echo ====================================================================
         pause
@@ -21,7 +22,7 @@ if %ERRORLEVEL% NEQ 0 (
     set "PY_CMD=python"
 )
 
-:: 2. Launch Library Manager (dependency_check will auto-prompt for any missing libraries)
+REM 2. Launch Library Manager (dependency_check will auto-prompt for any missing libraries)
 %PY_CMD% "%~dp0scripts\library_manager_gui.py"
 if %ERRORLEVEL% NEQ 0 (
     echo.

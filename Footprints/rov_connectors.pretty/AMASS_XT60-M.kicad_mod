@@ -289,7 +289,7 @@
 		(uuid "9a538179-b2c9-45f7-ac2f-918493450878")
 	)
 	(embedded_fonts no)
-	(model "${KIPRJMOD}/purdue-rov-kicad-lib/3D_Models/XT60-M.step"
+	(model "${KIPRJMOD}/libs/purdue-rov-kicad-lib/3D_Models/XT60-M.step"
 		(offset
 			(xyz 0 0 16)
 		)
