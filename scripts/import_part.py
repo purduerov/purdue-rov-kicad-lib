@@ -37,6 +37,7 @@ from kicad_sym_utils import (
     autofill_component_data,
     clean_symbol_lib_file,
     get_standard_passive_symbol,
+    rename_symbol,
     link_3d_model_to_footprint,
     CATEGORIES as ALLOWED_CATEGORIES
 )
@@ -184,6 +185,8 @@ def interactive_mode():
         if not sym_block:
             print("❌ Active/Connector/Sensor/Power parts require an input .kicad_sym file!")
             sys.exit(1)
+        if mpn:
+            sym_block = rename_symbol(sym_block, mpn)
         updated_sym = inject_or_update_properties(sym_block, field_updates)
 
     append_symbol_to_category(category, updated_sym)
@@ -196,7 +199,7 @@ def interactive_mode():
         print("\n🎉 Part imported successfully and verified compliant!")
         git_commit = input("Commit & Push to master now? (y/N): ").strip().lower()
         if git_commit == 'y':
-            subprocess.run(["git", "add", "Symbols/", "Footprints/"], cwd=str(BASE_DIR))
+            subprocess.run(["git", "add", "Symbols/", "Footprints/", "3D_Models/"], cwd=str(BASE_DIR))
             subprocess.run(["git", "commit", "-m", f"feat(lib): add {mpn or 'new part'} to {category} library"], cwd=str(BASE_DIR))
             subprocess.run(["git", "push", "origin", "master"], cwd=str(BASE_DIR))
             print("🚀 Pushed to remote master!")
@@ -249,6 +252,10 @@ def main():
         "Footprint": fp_ref
     }
     
+    target_mpn = field_updates["MPN"]
+    if target_mpn:
+        sym_block = rename_symbol(sym_block, target_mpn)
+
     updated_sym = inject_or_update_properties(sym_block, field_updates)
     append_symbol_to_category(category, updated_sym)
     

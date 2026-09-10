@@ -49,6 +49,40 @@ CATEGORY_KEYWORDS = {
     ]
 }
 
+def escape_sexpr_string(s):
+    """
+    Escapes double quotes, backslashes, and newlines for KiCad S-expression string literals.
+    """
+    if s is None:
+        return ""
+    s = str(s)
+    s = s.replace('\\', '\\\\').replace('"', '\\"')
+    s = s.replace('\r\n', '\\n').replace('\n', '\\n').replace('\r', '\\n')
+    return s
+
+
+def unescape_sexpr_string(s):
+    """
+    Unescapes KiCad S-expression string literals.
+    """
+    if s is None:
+        return ""
+    def _repl(match):
+        c = match.group(1)
+        if c == 'n':
+            return '\n'
+        elif c == 'r':
+            return '\r'
+        elif c == 't':
+            return '\t'
+        elif c == '"':
+            return '"'
+        elif c == '\\':
+            return '\\'
+        return c
+    return re.sub(r'\\(.)', _repl, s)
+
+
 def validate_sexpr(text):
     """
     Validates that parentheses in an S-expression text are balanced outside of quoted strings.
@@ -160,6 +194,7 @@ def parse_symbol_properties(sym_text):
     """
     Parses all (property "Key" "Value" ...) definitions in a symbol block.
     Returns a dict of {key: value} and a dict of detailed metadata {key: {'val': val, 'id': id, 'raw': raw, 'start': s, 'end': e}}.
+    Accurately handles escaped characters, quotes, and arbitrarily long strings.
     """
     props = {}
     details = {}
@@ -170,8 +205,6 @@ def parse_symbol_properties(sym_text):
     depth = 0
 
     prop_start = -1
-    prop_key = None
-    prop_val = None
 
     while idx < length:
         ch = sym_text[idx]
@@ -195,31 +228,28 @@ def parse_symbol_properties(sym_text):
             if ch == '(':
                 # Properties are directly inside the top-level symbol (depth 1)
                 if depth == 1:
-                    rest = sym_text[idx:min(idx+350, length)]
-                    # Match (property "KEY" "VALUE"
-                    m = re.match(r'^\(\s*property\s+"([^"]+)"\s+"([^"\\]*(?:\\.[^"\\]*)*)"', rest)
-                    if m:
-                        prop_key = m.group(1)
-                        prop_val = m.group(2)
+                    if re.match(r'^\(\s*property\b', sym_text[idx:min(idx+30, length)]):
                         prop_start = idx
                 depth += 1
             elif ch == ')':
                 depth -= 1
                 if prop_start != -1 and depth == 1:
                     raw_prop = sym_text[prop_start:idx+1]
-                    id_m = re.search(r'\(id\s+(\d+)\)', raw_prop)
-                    prop_id = int(id_m.group(1)) if id_m else None
-                    props[prop_key] = prop_val
-                    details[prop_key] = {
-                        'val': prop_val,
-                        'id': prop_id,
-                        'raw': raw_prop,
-                        'start': prop_start,
-                        'end': idx + 1
-                    }
+                    m = re.match(r'^\(\s*property\s+"((?:[^"\\]|\\.)+)"\s+"((?:[^"\\]|\\.)*)"', raw_prop)
+                    if m:
+                        prop_key = unescape_sexpr_string(m.group(1))
+                        prop_val = unescape_sexpr_string(m.group(2))
+                        id_m = re.search(r'\(id\s+(\d+)\)', raw_prop)
+                        prop_id = int(id_m.group(1)) if id_m else None
+                        props[prop_key] = prop_val
+                        details[prop_key] = {
+                            'val': prop_val,
+                            'id': prop_id,
+                            'raw': raw_prop,
+                            'start': prop_start,
+                            'end': idx + 1
+                        }
                     prop_start = -1
-                    prop_key = None
-                    prop_val = None
 
         idx += 1
 
@@ -229,7 +259,8 @@ def parse_symbol_properties(sym_text):
 def update_or_inject_properties(sym_text, field_updates, next_id_start=10):
     """
     Safely updates existing properties or injects new ones into a symbol S-expression.
-    Guarantees that nested parentheses in effects/font/at are NEVER corrupted.
+    Guarantees that nested parentheses in effects/font/at are NEVER corrupted and
+    special characters (quotes, backslashes) are escaped properly.
     """
     existing_props, details = parse_symbol_properties(sym_text)
     
@@ -244,12 +275,14 @@ def update_or_inject_properties(sym_text, field_updates, next_id_start=10):
         if val is None:
             continue
         val_str = str(val)
+        escaped_val = escape_sexpr_string(val_str)
         if field in details:
             d = details[field]
             old_raw = d['raw']
             # Safely replace only the value part: (property "KEY" "OLD_VAL" -> (property "KEY" "NEW_VAL"
-            pattern = re.compile(rf'(\(\s*property\s+"{re.escape(field)}"\s+")[^"\\]*(?:\\.[^"\\]*)*(")')
-            new_raw = pattern.sub(rf'\g<1>{val_str}\g<2>', old_raw)
+            escaped_field = re.escape(escape_sexpr_string(field))
+            pattern = re.compile(rf'(\(\s*property\s+"{escaped_field}"\s+")[^"\\]*(?:\\.[^"\\]*)*(")')
+            new_raw = pattern.sub(lambda m: f"{m.group(1)}{escaped_val}{m.group(2)}", old_raw)
             if new_raw != old_raw:
                 updated_sym = updated_sym.replace(old_raw, new_raw, 1)
 
@@ -285,7 +318,9 @@ def update_or_inject_properties(sym_text, field_updates, next_id_start=10):
         new_props_text = ""
         for field, val in props_to_add:
             indent = "    "
-            new_props_text += f'\n{indent}(property "{field}" "{val}" (id {next_id}) (at 0 0 0)\n{indent}  (effects (font (size 1.27 1.27)) hide)\n{indent})'
+            esc_field = escape_sexpr_string(field)
+            esc_val = escape_sexpr_string(val)
+            new_props_text += f'\n{indent}(property "{esc_field}" "{esc_val}" (id {next_id}) (at 0 0 0)\n{indent}  (effects (font (size 1.27 1.27)) hide)\n{indent})'
             next_id += 1
 
         updated_sym = updated_sym[:insert_idx] + new_props_text + updated_sym[insert_idx:]
@@ -580,11 +615,41 @@ def get_standard_passive_symbol(passive_type, symbol_name, properties):
     return update_or_inject_properties(renamed, props_to_apply)
 
 
+def rename_symbol(sym_text, new_name):
+    """
+    Renames a symbol and all its sub-units (e.g. NAME_0_1, NAME_1_1) to new_name.
+    Also updates the 'Value' property to match new_name if it was previously set to the old name.
+    """
+    if not sym_text or not new_name:
+        return sym_text
+    old_name = None
+    for m in re.finditer(r'\(\s*symbol\s+"([^"]+)"', sym_text):
+        name = m.group(1)
+        if not re.search(r'_\d+_\d+$', name):
+            old_name = name
+            break
+    if not old_name or old_name == new_name:
+        return sym_text
+
+    escaped_old = re.escape(old_name)
+    # 1. Replace top-level symbol name
+    renamed = re.sub(rf'(\(\s*symbol\s+)"{escaped_old}"', rf'\1"{new_name}"', sym_text, count=1)
+    # 2. Replace sub-unit names
+    renamed = re.sub(rf'(\(\s*symbol\s+)"{escaped_old}_([0-9]+_[0-9]+)"', rf'\1"{new_name}_\2"', renamed)
+    # 3. Update Value property to match new_name if Value matched old_name
+    props, _ = parse_symbol_properties(renamed)
+    if props.get("Value") == old_name:
+        renamed = update_or_inject_properties(renamed, {"Value": new_name})
+
+    return renamed
+
+
 def link_3d_model_to_footprint(fp_filepath, model_filename):
     """
     Ensures a .kicad_mod footprint references its 3D model (.step/.stp)
     using the standard relative path '${KIPRJMOD}/libs/purdue-rov-kicad-lib/3D_Models/<model_filename>'.
     If the footprint already has a (model ...) statement, updates its path.
+    Also resets scale to (xyz 1 1 1) when replacing with a .step/.stp model to prevent VRML scale distortion.
     Otherwise, injects the model statement right before the closing parenthesis.
     """
     fp_path = Path(fp_filepath)
@@ -605,6 +670,13 @@ def link_3d_model_to_footprint(fp_filepath, model_filename):
             content,
             count=1
         )
+        if model_filename.lower().endswith(('.step', '.stp')):
+            # Reset scale to 1 1 1 for STEP models to prevent VRML scale distortion (e.g. 0.3937)
+            m_block = re.search(r'\(model\s+"[^"]*".*?\n\s*\)', updated_content, re.DOTALL)
+            if m_block:
+                old_block = m_block.group(0)
+                new_block = re.sub(r'\(scale\s+\(xyz\s+[^)]+\)\)', '(scale (xyz 1 1 1))', old_block)
+                updated_content = updated_content.replace(old_block, new_block, 1)
     else:
         # Insert model clause before the last closing paren
         model_block = (

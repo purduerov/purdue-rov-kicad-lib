@@ -13,13 +13,17 @@ jobs:
       matrix:
         repo:
           - board-template
+          - X19-Control-Board
           - X19-Electrical-New-Member-Board
           - X19-Float-Board
+          - X19-Pi-Shield-Board
+          - X19-Power-Slab-Board
+          - X19-Pressure-Chamber-Board
     steps:
       - name: Dispatch Library Update Event
         uses: peter-evans/repository-dispatch@v3
         continue-on-error: true
         with:
           token: ${{ secrets.ORG_DISPATCH_TOKEN || secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
-          repository: purduerov/${{{ matrix.repo }}}
+          repository: purduerov/${{ matrix.repo }}
           event-type: update-library

@@ -209,12 +209,54 @@ class TestKiCadSymUtils(unittest.TestCase):
             valid, err = kicad_sym_utils.validate_sexpr(content)
             self.assertTrue(valid, f"Footprint S-expr corrupted: {err}")
 
-            # Test updating existing model path
-            success_update = kicad_sym_utils.link_3d_model_to_footprint(fp_path, "resistor_0805_v2.step")
-            self.assertTrue(success_update)
-            content_updated = fp_path.read_text(encoding="utf-8")
-            self.assertIn('(model "${KIPRJMOD}/libs/purdue-rov-kicad-lib/3D_Models/resistor_0805_v2.step"', content_updated)
-            self.assertNotIn('resistor_0805.step"', content_updated)
+            # Test updating existing model path and resetting VRML scale for STEP model
+            vrml_mod = """(footprint "CONN_HDR"
+  (layer "F.Cu")
+  (model "${KIPRJMOD}/libs/purdue-rov-kicad-lib/3D_Models/conn.wrl"
+    (offset (xyz 0 0 0))
+    (scale (xyz 0.3937 0.3937 0.3937))
+    (rotate (xyz 0 0 0))
+  )
+)"""
+            fp_vrml_path = Path(tmpdir) / "vrml_test.kicad_mod"
+            fp_vrml_path.write_text(vrml_mod, encoding="utf-8")
+            kicad_sym_utils.link_3d_model_to_footprint(fp_vrml_path, "conn.step")
+            vrml_updated = fp_vrml_path.read_text(encoding="utf-8")
+            self.assertIn('(scale (xyz 1 1 1))', vrml_updated)
+            self.assertNotIn('0.3937', vrml_updated)
+
+    def test_property_quotes_and_backslashes_escaping(self):
+        updates = {
+            "Description": '0.1" Pitch Header 1x4 Pin \\ Gold Plated',
+            "MPN": 'CONN-"TEST"\\123'
+        }
+        updated = kicad_sym_utils.update_or_inject_properties(SAMPLE_CORRECT_POWER_SYM, updates)
+        valid, err = kicad_sym_utils.validate_sexpr(updated)
+        self.assertTrue(valid, f"Escaping error resulted in invalid S-expr: {err}")
+
+        parsed_props, _ = kicad_sym_utils.parse_symbol_properties(updated)
+        self.assertEqual(parsed_props.get("Description"), '0.1" Pitch Header 1x4 Pin \\ Gold Plated')
+        self.assertEqual(parsed_props.get("MPN"), 'CONN-"TEST"\\123')
+
+    def test_long_property_values(self):
+        long_desc = "A" * 600 + " - Very long description exceeding old 350 char limit"
+        updates = {"Description": long_desc}
+        updated = kicad_sym_utils.update_or_inject_properties(SAMPLE_CORRECT_POWER_SYM, updates)
+        valid, err = kicad_sym_utils.validate_sexpr(updated)
+        self.assertTrue(valid, f"S-expression corrupted on long property: {err}")
+
+        parsed_props, _ = kicad_sym_utils.parse_symbol_properties(updated)
+        self.assertEqual(parsed_props.get("Description"), long_desc)
+
+    def test_rename_symbol(self):
+        renamed = kicad_sym_utils.rename_symbol(SAMPLE_RAW_DOWNLOADED_VENDOR_SYM, "TPS62130RGTR")
+        self.assertIn('(symbol "TPS62130RGTR"', renamed)
+        self.assertIn('(symbol "TPS62130RGTR_0_1"', renamed)
+        self.assertNotIn('(symbol "TPS62130_RAW"', renamed)
+        self.assertNotIn('(symbol "TPS62130_RAW_0_1"', renamed)
+
+        valid, err = kicad_sym_utils.validate_sexpr(renamed)
+        self.assertTrue(valid, f"Renamed symbol S-expr invalid: {err}")
 
 if __name__ == "__main__":
     unittest.main()

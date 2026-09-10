@@ -35,6 +35,7 @@ from kicad_sym_utils import (
     autofill_component_data,
     clean_symbol_lib_file,
     get_standard_passive_symbol,
+    rename_symbol,
     link_3d_model_to_footprint,
     CATEGORIES,
     CATEGORY_KEYWORDS
@@ -205,6 +206,7 @@ class ImportPartDialog:
         self.seen_downloads = set()
 
         self.build_ui()
+        self.dialog.protocol("WM_DELETE_WINDOW", self.on_close)
         self.init_seen_downloads()
 
     def build_ui(self):
@@ -295,7 +297,7 @@ class ImportPartDialog:
         btn_frame = ttk.Frame(main_frame, style="Surface.TFrame")
         btn_frame.pack(fill=tk.X, pady=(10, 0))
 
-        btn_cancel = ttk.Button(btn_frame, text="Cancel", command=self.dialog.destroy)
+        btn_cancel = ttk.Button(btn_frame, text="Cancel", command=self.on_close)
         btn_cancel.pack(side=tk.LEFT)
 
         btn_import = ttk.Button(btn_frame, text="🚀 Ingest & Add to Library", style="Success.TButton", command=self.process_import)
@@ -420,8 +422,16 @@ class ImportPartDialog:
             self.seen_downloads = current_files
             
             for f in new_files:
-                if f.suffix.lower() in [".kicad_sym", ".kicad_mod", ".zip"]:
-                    self.dialog.after(0, self.on_new_file_detected, f)
+                if f.suffix.lower() in [".kicad_sym", ".kicad_mod", ".zip", ".step", ".stp"]:
+                    if self.watcher_running:
+                        self.dialog.after(0, self.on_new_file_detected, f)
+
+    def on_close(self):
+        self.watcher_running = False
+        if self.temp_dir and os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir, ignore_errors=True)
+            self.temp_dir = None
+        self.dialog.destroy()
 
     def on_new_file_detected(self, file_path):
         self.dialog.lift()
@@ -480,6 +490,10 @@ class ImportPartDialog:
                 return
 
             sym_name, raw_sym, _, _ = syms[0]
+            target_name = field_values.get("MPN") or sym_name
+            if target_name and target_name != sym_name:
+                raw_sym = rename_symbol(raw_sym, target_name)
+                sym_name = target_name
 
             # Robustly update/inject properties
             try:
@@ -492,7 +506,7 @@ class ImportPartDialog:
         try:
             LibraryParser.insert_symbol(category, updated_sym)
             messagebox.showinfo("Success", f"Component '{sym_name}' successfully added to {category} library!")
-            self.dialog.destroy()
+            self.on_close()
             if self.callback_on_imported:
                 self.callback_on_imported()
         except Exception as e:
