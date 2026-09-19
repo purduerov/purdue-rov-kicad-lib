@@ -103,5 +103,18 @@ class TestLibraryManager(unittest.TestCase):
         LibraryParser.delete_symbol(self.test_sym_name, "Power")
         self.assertNotIn(self.test_sym_name, LibraryParser.load_all_symbols())
 
+    def test_insert_into_power_preserves_kicad_validity(self):
+        # Specifically test that inserting into Power does not cause it to disappear or corrupt
+        from kicad_sym_utils import validate_sexpr
+        LibraryParser.insert_symbol("Power", self.test_raw_sym)
+        
+        power_file = BASE_DIR / "Symbols" / "rov_power.kicad_sym"
+        with open(power_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+            
+        is_valid, err = validate_sexpr(content)
+        self.assertTrue(is_valid, f"Power library became invalid S-expression: {err}")
+        self.assertNotIn("#", content, "Illegal comment character found in power library")
+
 if __name__ == "__main__":
     unittest.main()
