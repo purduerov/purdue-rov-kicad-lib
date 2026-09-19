@@ -25,3 +25,9 @@ jobs:
       - name: Run Symbol Library Linter
         run: |
           find Symbols -name "*.kicad_sym" -exec python3 scripts/linter_validator.py {} +
+
+      - name: Verify Symbol Compiler Output
+        run: |
+          python3 scripts/build_symbol_libs.py
+          git diff --exit-code Symbols/*.kicad_sym
+

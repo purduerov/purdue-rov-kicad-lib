@@ -41,13 +41,16 @@ from kicad_sym_utils import (
     CATEGORIES,
     CATEGORY_KEYWORDS
 )
+from build_symbol_libs import build_all_categories
 
 # Paths
 BASE_DIR = Path(__file__).resolve().parent.parent
 SYMBOLS_DIR = BASE_DIR / "Symbols"
+PARTS_DIR = SYMBOLS_DIR / "parts"
 FOOTPRINTS_DIR = BASE_DIR / "Footprints"
 MODELS_DIR = BASE_DIR / "3D_Models"
 DOWNLOADS_DIR = Path.home() / "Downloads"
+
 
 
 def create_pull_request_flow(component_name, category):
@@ -190,98 +193,71 @@ class LibraryParser:
 
     @staticmethod
     def save_symbol(sym_name, old_category, new_category, new_properties, raw_sym_text):
-        """Updates or moves a symbol with new properties safely."""
+        """Updates or moves a symbol in its individual part file and recompiles the category libraries."""
         new_properties["Category"] = new_category
         updated_sym = update_or_inject_properties(raw_sym_text, new_properties)
 
-        old_file = SYMBOLS_DIR / f"{CATEGORY_FILES[old_category]}.kicad_sym"
-        new_file = SYMBOLS_DIR / f"{CATEGORY_FILES[new_category]}.kicad_sym"
+        # 1. Remove old individual part file if moving category
+        safe_sym = re.sub(r'[^a-zA-Z0-9_\-\.\+]', '_', sym_name)
+        old_part = PARTS_DIR / old_category.lower() / f"{safe_sym}.kicad_sym"
+        if old_part.exists():
+            old_part.unlink()
 
-        if old_category == new_category and old_file.exists():
-            clean_symbol_lib_file(old_file)
-            with open(old_file, 'r', encoding='utf-8', errors='ignore') as f:
-                content = f.read()
+        # 2. Save new individual part file
+        new_folder = PARTS_DIR / new_category.lower()
+        new_folder.mkdir(parents=True, exist_ok=True)
+        new_part = new_folder / f"{safe_sym}.kicad_sym"
 
-            syms = extract_top_symbols(content)
-            replaced = False
-            for sname, sraw, sstart, send in syms:
-                if sname == sym_name:
-                    content = content[:sstart] + updated_sym + content[send:]
-                    replaced = True
-                    break
+        part_content = (
+            '(kicad_symbol_lib (version 20211014) (generator "kicad_symbol_editor")\n'
+            f'  {updated_sym.strip()}\n'
+            ')\n'
+        )
+        new_part.write_text(part_content, encoding="utf-8")
 
-            if not replaced:
-                if raw_sym_text in content:
-                    content = content.replace(raw_sym_text, updated_sym, 1)
-                else:
-                    content = content.rstrip()
-                    last_paren = content.rfind(')')
-                    content = content[:last_paren].rstrip() + "\n  " + updated_sym + "\n)\n"
-
-            is_valid, err = validate_sexpr(content)
-            if not is_valid:
-                raise ValueError(f"S-expression validation failed: {err}")
-
-            with open(old_file, 'w', encoding='utf-8') as f:
-                f.write(content.strip() + '\n')
-        else:
-            LibraryParser.delete_symbol(sym_name, old_category, raw_sym_text)
-            LibraryParser.insert_symbol(new_category, updated_sym)
+        # 3. Recompile monolithic category libraries
+        build_all_categories()
 
     @staticmethod
     def delete_symbol(sym_name, category, raw_sym_text=None):
-        """Removes a symbol from its category file."""
-        target_file = SYMBOLS_DIR / f"{CATEGORY_FILES.get(category, 'rov_passives')}.kicad_sym"
-        if not target_file.exists():
-            return
-        clean_symbol_lib_file(target_file)
-        with open(target_file, 'r', encoding='utf-8', errors='ignore') as f:
-            content = f.read()
+        """Removes a symbol from its individual part file and recompiles."""
+        safe_name = re.sub(r'[^a-zA-Z0-9_\-\.\+]', '_', sym_name)
+        cat_lower = category.lower() if category else ""
+        candidates = [PARTS_DIR / cat_lower / f"{safe_name}.kicad_sym"] if cat_lower else []
+        candidates.extend(PARTS_DIR.rglob(f"{safe_name}.kicad_sym"))
+        for p in candidates:
+            if p.exists():
+                p.unlink()
 
-        syms = extract_top_symbols(content)
-        deleted = False
-        for sname, sraw, sstart, send in syms:
-            if sname == sym_name:
-                content = content[:sstart].rstrip() + "\n" + content[send:].lstrip()
-                deleted = True
-                break
+        # Recompile monolithic category libraries
+        build_all_categories()
 
-        if not deleted and raw_sym_text and raw_sym_text in content:
-            content = content.replace(raw_sym_text, "")
-
-        content = re.sub(r'\n\s*\n\s*\n', '\n\n', content).strip()
-        is_valid, err = validate_sexpr(content)
-        if is_valid:
-            with open(target_file, 'w', encoding='utf-8') as f:
-                f.write(content + '\n')
 
     @staticmethod
     def insert_symbol(category, raw_sym_text):
-        """Appends a new symbol into the specified category file with bulletproof S-expression syntax."""
-        target_file = SYMBOLS_DIR / f"{CATEGORY_FILES[category]}.kicad_sym"
-        if not target_file.exists():
-            with open(target_file, 'w', encoding='utf-8') as f:
-                f.write('(kicad_symbol_lib\n  (version 20211014)\n  (generator "kicad_symbol_editor")\n)\n')
-
-        clean_symbol_lib_file(target_file)
-        with open(target_file, 'r', encoding='utf-8', errors='ignore') as f:
-            content = f.read().strip()
-
-        if not content.startswith('(kicad_symbol_lib'):
-            content = '(kicad_symbol_lib\n  (version 20211014)\n  (generator "kicad_symbol_editor")\n)'
-
-        last_paren = content.rfind(')')
-        if last_paren != -1:
-            new_content = content[:last_paren].rstrip() + "\n  " + raw_sym_text.strip() + "\n)\n"
+        """Appends a new symbol by creating its dedicated individual part file and recompiling."""
+        extracted = extract_top_symbols(raw_sym_text)
+        if extracted:
+            sym_name = extracted[0][0]
         else:
-            new_content = content + "\n  " + raw_sym_text.strip() + "\n)\n"
+            m = re.search(r'\(symbol\s+"([^"]+)"', raw_sym_text)
+            sym_name = m.group(1) if m else "NEW_PART"
 
-        is_valid, err = validate_sexpr(new_content)
-        if not is_valid:
-            raise ValueError(f"Failed to generate valid S-expression for {category} library: {err}")
+        safe_name = re.sub(r'[^a-zA-Z0-9_\-\.\+]', '_', sym_name)
+        cat_folder = PARTS_DIR / category.lower()
+        cat_folder.mkdir(parents=True, exist_ok=True)
+        part_file = cat_folder / f"{safe_name}.kicad_sym"
 
-        with open(target_file, 'w', encoding='utf-8') as f:
-            f.write(new_content)
+        part_content = (
+            '(kicad_symbol_lib (version 20211014) (generator "kicad_symbol_editor")\n'
+            f'  {raw_sym_text.strip()}\n'
+            ')\n'
+        )
+        part_file.write_text(part_content, encoding="utf-8")
+
+        # Recompile monolithic category libraries
+        build_all_categories()
+
 
 
 class ImportPartDialog:
