@@ -320,4 +320,9 @@
   (pad "46" smd rect (at -1.749999 -4.1148) (size 0.2794 1.4732) (layers "F.Cu" "F.Paste" "F.Mask"))
   (pad "47" smd rect (at -2.250001 -4.1148) (size 0.2794 1.4732) (layers "F.Cu" "F.Paste" "F.Mask"))
   (pad "48" smd rect (at -2.75 -4.1148) (size 0.2794 1.4732) (layers "F.Cu" "F.Paste" "F.Mask"))
+  (model "${KIPRJMOD}/libs/purdue-rov-kicad-lib/3D_Models/LQFP-48_7x7mm_P0.5mm.step"
+    (offset (xyz 0 0 0))
+    (scale (xyz 1 1 1))
+    (rotate (xyz 0 0 0))
+  )
 )
