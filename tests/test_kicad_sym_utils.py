@@ -258,5 +258,49 @@ class TestKiCadSymUtils(unittest.TestCase):
         valid, err = kicad_sym_utils.validate_sexpr(renamed)
         self.assertTrue(valid, f"Renamed symbol S-expr invalid: {err}")
 
+    def test_validate_component_rules_success(self):
+        good_fields = {
+            "MPN": "STM32C542CCT6",
+            "Manufacturer": "STMicroelectronics",
+            "Category": "Logic",
+            "Datasheet": "https://www.st.com/resource/en/datasheet/stm32c542cc.pdf",
+            "DigiKey": "https://www.digikey.com/en/products/detail/stmicroelectronics/STM32C542CCT6/28948246",
+            "Temp_Range": "-40°C to 125°C",
+            "Footprint": "rov_logic:LQFP48-7X7"
+        }
+        errors, warnings = kicad_sym_utils.validate_component_rules(good_fields)
+        self.assertEqual(errors, [])
+        self.assertEqual(warnings, [])
+
+    def test_validate_component_rules_catches_errors(self):
+        bad_fields = {
+            "MPN": "497-STM32C542CCT6-ND", # DigiKey SKU in MPN
+            "Manufacturer": "497-STM32C542CCT6-ND", # Same as MPN
+            "Category": "InvalidCat",
+            "Datasheet": "https://not-a-pdf.com/info.html",
+            "DigiKey": "",
+            "Temp_Range": ""
+        }
+        errors, warnings = kicad_sym_utils.validate_component_rules(bad_fields)
+        self.assertTrue(any("DigiKey part number" in e for e in errors))
+        self.assertTrue(any("identical to MPN" in e for e in errors))
+        self.assertTrue(any("Invalid Category" in e for e in errors))
+        self.assertTrue(any("PDF document" in e for e in errors))
+        self.assertTrue(any("Missing mandatory field: 'DigiKey'" in e for e in errors))
+        self.assertTrue(any("Missing mandatory field: 'Temp_Range'" in e for e in errors))
+
+    def test_smart_autofill_mfr_and_digikey_swap(self):
+        raw_sym = """(symbol "497-STM32C542CCT6-ND"
+            (property "Value" "497-STM32C542CCT6-ND" (id 1) (at 0 0 0))
+            (property "Datasheet" "https://example.com/doc.pdf" (id 2) (at 0 0 0))
+        )"""
+        data = kicad_sym_utils.autofill_component_data(raw_sym)
+        # MPN should be cleaned to STM32C542CCT6
+        self.assertEqual(data["MPN"], "STM32C542CCT6")
+        self.assertEqual(data["DigiKey"], "497-STM32C542CCT6-ND")
+        self.assertEqual(data["Manufacturer"], "STMicroelectronics")
+        self.assertEqual(data["Category"], "Logic")
+
 if __name__ == "__main__":
     unittest.main()
+

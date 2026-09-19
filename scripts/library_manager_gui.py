@@ -37,6 +37,7 @@ from kicad_sym_utils import (
     get_standard_passive_symbol,
     rename_symbol,
     link_3d_model_to_footprint,
+    validate_component_rules,
     CATEGORIES,
     CATEGORY_KEYWORDS
 )
@@ -47,6 +48,103 @@ SYMBOLS_DIR = BASE_DIR / "Symbols"
 FOOTPRINTS_DIR = BASE_DIR / "Footprints"
 MODELS_DIR = BASE_DIR / "3D_Models"
 DOWNLOADS_DIR = Path.home() / "Downloads"
+
+
+def create_pull_request_flow(component_name, category):
+    """
+    Verifies linter compliance, stages library changes, creates a dedicated git branch,
+    pushes to origin, and opens a GitHub Pull Request via gh CLI (or browser fallback).
+    """
+    # 1. Run linter pre-check across all symbols
+    linter_script = BASE_DIR / "scripts" / "linter_validator.py"
+    if linter_script.exists():
+        sym_files = list(SYMBOLS_DIR.glob("*.kicad_sym"))
+        res = subprocess.run([sys.executable, str(linter_script)] + [str(p) for p in sym_files], capture_output=True, text=True)
+        if res.returncode != 0:
+            err_msg = res.stderr.strip() or res.stdout.strip()
+            messagebox.showerror("Linter Validation Failed", f"Cannot open Pull Request because library validation failed:\n\n{err_msg}")
+            return False
+
+    # 2. Check for working tree changes
+    try:
+        status = subprocess.check_output(["git", "status", "--porcelain"], cwd=str(BASE_DIR), text=True)
+        if not status.strip():
+            messagebox.showinfo("No Changes", "No modified or uncommitted library files found to include in a Pull Request.")
+            return False
+    except Exception as e:
+        messagebox.showerror("Git Error", f"Failed to check git status:\n{e}")
+        return False
+
+    # 3. Create a unique branch name
+    clean_name = re.sub(r'[^a-zA-Z0-9_\-]', '', str(component_name)).strip('-') or "component"
+    timestamp = int(time.time()) % 100000
+    branch_name = f"add-part-{clean_name.lower()}-{timestamp}"
+
+    try:
+        subprocess.run(["git", "checkout", "-b", branch_name], cwd=str(BASE_DIR), check=True)
+        subprocess.run(["git", "add", "Symbols", "Footprints", "3D_Models"], cwd=str(BASE_DIR), check=True)
+        commit_msg = f"feat(parts): add {component_name} to {category}"
+        subprocess.run(["git", "commit", "-m", commit_msg], cwd=str(BASE_DIR), check=True)
+        subprocess.run(["git", "push", "-u", "origin", branch_name], cwd=str(BASE_DIR), check=True)
+    except Exception as e:
+        messagebox.showerror("Git Push Failed", f"Failed to create or push branch '{branch_name}':\n{e}")
+        try:
+            subprocess.run(["git", "checkout", "master"], cwd=str(BASE_DIR))
+        except Exception:
+            pass
+        return False
+
+    # 4. Open Pull Request via gh CLI or fallback to Browser
+    pr_compare_url = f"https://github.com/purduerov/purdue-rov-kicad-lib/compare/master...{branch_name}?expand=1"
+    gh_path = shutil.which("gh")
+    pr_created = False
+
+    if gh_path:
+        try:
+            gh_cmd = [
+                "gh", "pr", "create",
+                "--base", "master",
+                "--head", branch_name,
+                "--title", f"feat(parts): add {component_name} to {category}",
+                "--body", (
+                    f"### 📦 Purdue ROV Component Ingestion\n\n"
+                    f"- **Part:** `{component_name}`\n"
+                    f"- **Category:** `{category}`\n\n"
+                    f"Automated PR created via Purdue ROV Library Manager GUI."
+                )
+            ]
+            res = subprocess.run(gh_cmd, cwd=str(BASE_DIR), capture_output=True, text=True, check=True)
+            pr_url = res.stdout.strip()
+            webbrowser.open(pr_url)
+            messagebox.showinfo(
+                "Pull Request Created",
+                f"✅ Successfully created Pull Request via GitHub CLI!\n\n{pr_url}\n\nOpened in your browser."
+            )
+            pr_created = True
+        except Exception as gh_err:
+            print("gh pr create failed:", gh_err)
+
+    if not pr_created:
+        install_prompt = (
+            "ℹ️ GitHub CLI (`gh`) is recommended for automatic 1-click PR creation.\n\n"
+            "To install GitHub CLI:\n"
+            "  • Windows: winget install --id GitHub.cli\n"
+            "  • macOS:   brew install gh\n"
+            "  • Linux:   sudo apt install gh\n\n"
+            "Then run in terminal: gh auth login\n\n"
+            "Opening the GitHub Pull Request compare page in your browser now..."
+        )
+        messagebox.showinfo("Opening Pull Request in Browser", install_prompt)
+        webbrowser.open(pr_compare_url)
+
+    # 5. Return to master
+    try:
+        subprocess.run(["git", "checkout", "master"], cwd=str(BASE_DIR), check=True)
+    except Exception:
+        pass
+
+    return True
+
 
 CATEGORY_FILES = {
     "Passives": "rov_passives",
@@ -300,8 +398,20 @@ class ImportPartDialog:
         btn_cancel = ttk.Button(btn_frame, text="Cancel", command=self.on_close)
         btn_cancel.pack(side=tk.LEFT)
 
-        btn_import = ttk.Button(btn_frame, text="🚀 Ingest & Add to Library", style="Success.TButton", command=self.process_import)
-        btn_import.pack(side=tk.RIGHT)
+        btn_import_pr = ttk.Button(
+            btn_frame,
+            text="🚀 Ingest & Open Pull Request",
+            style="Success.TButton",
+            command=lambda: self.process_import(open_pr=True)
+        )
+        btn_import_pr.pack(side=tk.RIGHT, padx=(5, 0))
+
+        btn_import_local = ttk.Button(
+            btn_frame,
+            text="💾 Save Locally",
+            command=lambda: self.process_import(open_pr=False)
+        )
+        btn_import_local.pack(side=tk.RIGHT, padx=5)
 
     def browse_files(self):
         file_path = filedialog.askopenfilename(
@@ -445,10 +555,28 @@ class ImportPartDialog:
         else:
             self.passive_frame.pack_forget()
 
-    def process_import(self):
+    def process_import(self, open_pr=True):
         category = self.selected_category.get()
         field_values = {k: v.get().strip() for k, v in self.entries.items()}
         field_values["Category"] = category
+
+        # Run strict rule validation
+        errors, warnings = validate_component_rules(field_values)
+        if errors:
+            messagebox.showerror(
+                "Rule Validation Error - Ingestion Blocked",
+                "Please fix the following compliance errors before adding to the library:\n\n• " + "\n• ".join(errors)
+            )
+            return
+
+        if warnings:
+            confirm = messagebox.askyesno(
+                "Category Verification Warning",
+                "The following potential mismatch was detected:\n\n" + "\n".join(f"• {w}" for w in warnings) +
+                f"\n\nDo you want to proceed with category '{category}' anyway?"
+            )
+            if not confirm:
+                return
 
         # For Passives, symbol file is optional because we use standard KiCad Device symbols
         if category != "Passives" and not self.sym_file:
@@ -502,13 +630,24 @@ class ImportPartDialog:
                 messagebox.showerror("Property Error", f"Failed to inject properties into symbol:\n{e}")
                 return
 
+        # Pre-flight S-expression check
+        is_valid, err = validate_sexpr(updated_sym)
+        if not is_valid:
+            messagebox.showerror("S-expression Error", f"Failed to generate valid S-expression syntax:\n{err}")
+            return
+
         # 3. Save into category library
         try:
             LibraryParser.insert_symbol(category, updated_sym)
-            messagebox.showinfo("Success", f"Component '{sym_name}' successfully added to {category} library!")
-            self.on_close()
             if self.callback_on_imported:
                 self.callback_on_imported()
+
+            if open_pr:
+                self.on_close()
+                create_pull_request_flow(sym_name, category)
+            else:
+                messagebox.showinfo("Success", f"Component '{sym_name}' successfully added locally to {category} library!")
+                self.on_close()
         except Exception as e:
             messagebox.showerror("Import Error", f"Failed to save symbol to library:\n{e}")
 
@@ -578,6 +717,9 @@ class LibraryManagerApp:
 
         btn_lint = ttk.Button(toolbar, text="🔍 Validate All (Linter)", style="Accent.TButton", command=self.run_linter)
         btn_lint.pack(side=tk.LEFT, padx=5)
+
+        btn_pr = ttk.Button(toolbar, text="🚀 Submit via PR", style="Success.TButton", command=self.create_pr_from_toolbar)
+        btn_pr.pack(side=tk.LEFT, padx=5)
 
         btn_refresh = ttk.Button(toolbar, text="🔄 Reload", command=self.refresh_symbols)
         btn_refresh.pack(side=tk.LEFT, padx=5)
@@ -844,6 +986,25 @@ class LibraryManagerApp:
         for k, var in self.fields_entries.items():
             if k not in ["Name", "Category"]:
                 new_props[k] = var.get().strip()
+        new_props["Category"] = new_cat
+
+        # Validate rules before saving
+        errors, warnings = validate_component_rules(new_props)
+        if errors:
+            messagebox.showerror(
+                "Rule Validation Error",
+                "Please correct the following compliance errors before saving:\n\n• " + "\n• ".join(errors)
+            )
+            return
+
+        if warnings:
+            confirm = messagebox.askyesno(
+                "Category Verification Warning",
+                "The following warning was detected:\n\n" + "\n".join(f"• {w}" for w in warnings) +
+                f"\n\nDo you want to proceed with category '{new_cat}' anyway?"
+            )
+            if not confirm:
+                return
 
         try:
             LibraryParser.save_symbol(sym_name, old_cat, new_cat, new_props, data["raw_text"])
@@ -854,6 +1015,11 @@ class LibraryManagerApp:
                 self.tree.see(sym_name)
         except Exception as e:
             messagebox.showerror("Error Saving", f"Failed to save changes: {e}")
+
+    def create_pr_from_toolbar(self):
+        sym_name = self.selected_symbol_name or "Component_Update"
+        cat = self.fields_entries["Category"].get() if self.selected_symbol_name else "General"
+        create_pull_request_flow(sym_name, cat)
 
     def delete_current_symbol(self):
         if not self.selected_symbol_name or self.selected_symbol_name not in self.symbols:
@@ -893,15 +1059,26 @@ class LibraryManagerApp:
     def git_sync(self):
         try:
             subprocess.run(["git", "pull", "--rebase", "origin", "master"], cwd=str(BASE_DIR), check=True)
-            subprocess.run(["git", "add", "-A"], cwd=str(BASE_DIR), check=True)
             status = subprocess.check_output(["git", "status", "--porcelain"], cwd=str(BASE_DIR), text=True)
             if not status.strip():
                 messagebox.showinfo("Git Sync", "Library is already up to date with remote master. No local changes to commit.")
                 return
-            
-            subprocess.run(["git", "commit", "-m", "chore(lib): update central component library via Library Manager GUI"], cwd=str(BASE_DIR), check=True)
-            subprocess.run(["git", "push", "origin", "master"], cwd=str(BASE_DIR), check=True)
-            messagebox.showinfo("Git Sync", "✅ Library changes successfully committed and pushed to GitHub master!")
+
+            ask_pr = messagebox.askyesno(
+                "Submit via Pull Request?",
+                "Local library changes detected!\n\n"
+                "Would you like to submit these changes via a Pull Request? (Recommended)\n\n"
+                "Select 'Yes' to open a PR branch, or 'No' to push directly to master."
+            )
+            if ask_pr:
+                sym_name = self.selected_symbol_name or "Library_Update"
+                cat = self.fields_entries["Category"].get() if self.selected_symbol_name else "General"
+                create_pull_request_flow(sym_name, cat)
+            else:
+                subprocess.run(["git", "add", "-A"], cwd=str(BASE_DIR), check=True)
+                subprocess.run(["git", "commit", "-m", "chore(lib): update central component library via Library Manager GUI"], cwd=str(BASE_DIR), check=True)
+                subprocess.run(["git", "push", "origin", "master"], cwd=str(BASE_DIR), check=True)
+                messagebox.showinfo("Git Sync", "✅ Library changes successfully committed and pushed to GitHub master!")
         except Exception as e:
             messagebox.showerror("Git Sync Failed", f"Git operation failed:\n{e}")
 

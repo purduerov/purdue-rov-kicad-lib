@@ -49,6 +49,40 @@ CATEGORY_KEYWORDS = {
     ]
 }
 
+KNOWN_MFR_PREFIXES = {
+    "STM32": "STMicroelectronics",
+    "STM8": "STMicroelectronics",
+    "ESP32": "Espressif Systems",
+    "ESP8266": "Espressif Systems",
+    "ATMEGA": "Microchip Technology",
+    "ATTINY": "Microchip Technology",
+    "SAMD": "Microchip Technology",
+    "PIC16": "Microchip Technology",
+    "PIC18": "Microchip Technology",
+    "PIC24": "Microchip Technology",
+    "PIC32": "Microchip Technology",
+    "TPS": "Texas Instruments",
+    "MSP430": "Texas Instruments",
+    "LM": "Texas Instruments",
+    "TLV": "Texas Instruments",
+    "INA": "Texas Instruments",
+    "MAX": "Analog Devices",
+    "LTC": "Analog Devices",
+    "AD": "Analog Devices",
+    "RP2040": "Raspberry Pi",
+    "RP2350": "Raspberry Pi",
+    "FT232": "FTDI Chip",
+    "CH340": "WCH",
+    "XT60": "AMASS",
+    "XT30": "AMASS",
+    "XT90": "AMASS",
+    "BNO055": "Bosch Sensortec",
+    "BMP280": "Bosch Sensortec",
+    "BME280": "Bosch Sensortec",
+    "MPU6050": "TDK InvenSense",
+    "ICM": "TDK InvenSense",
+}
+
 def escape_sexpr_string(s):
     """
     Escapes double quotes, backslashes, and newlines for KiCad S-expression string literals.
@@ -417,6 +451,16 @@ def autofill_component_data(sym_text, sym_name=None, fp_name=None, zip_files=Non
         else:
             mpn = ""
 
+    # Check for DigiKey SKU pasted into MPN
+    if mpn and mpn.upper().endswith("-ND"):
+        dk_match = re.match(r'^(?:\d+-)?([A-Za-z0-9_\-\.\+]+?)(?:-[0-9]+)?-ND$', mpn, re.IGNORECASE)
+        if dk_match:
+            extracted_mpn = dk_match.group(1)
+            autofilled.append(f"MPN (extracted '{extracted_mpn}' from DigiKey SKU)")
+            if not props.get("DigiKey"):
+                props["DigiKey"] = mpn
+            mpn = extracted_mpn
+
     # 2. Manufacturer Detection
     mfr = None
     mfr_aliases = [
@@ -428,6 +472,16 @@ def autofill_component_data(sym_text, sym_name=None, fp_name=None, zip_files=Non
             mfr = props[alias].strip()
             autofilled.append("Manufacturer")
             break
+
+    # Smart Manufacturer Inference from MPN Prefix if missing or invalid
+    if (not mfr or (mpn and mfr.upper() == mpn.upper())) and mpn:
+        mpn_upper = mpn.upper()
+        for pfx, mfr_name in KNOWN_MFR_PREFIXES.items():
+            if mpn_upper.startswith(pfx):
+                mfr = mfr_name
+                autofilled.append(f"Manufacturer (inferred from {pfx})")
+                break
+
     if not mfr:
         mfr = ""
 
@@ -475,7 +529,12 @@ def autofill_component_data(sym_text, sym_name=None, fp_name=None, zip_files=Non
                 digikey = v_clean
                 autofilled.append(f"DigiKey (detected from {k})")
                 break
-    if not digikey:
+
+    # Fallback to search URL if DigiKey SKU is missing
+    if not digikey and mpn:
+        digikey = f"https://www.digikey.com/en/products?keywords={urllib.parse.quote(mpn)}"
+        autofilled.append("DigiKey (search URL)")
+    elif not digikey:
         digikey = ""
 
     # 5. Temperature Range Detection
@@ -541,6 +600,57 @@ def autofill_component_data(sym_text, sym_name=None, fp_name=None, zip_files=Non
         "Value": props.get("Value", sym_name),
         "Reference": props.get("Reference", "U")
     }
+
+
+def validate_component_rules(fields_dict):
+    """
+    Validates mandatory fields, URL formats, category assignments, and value sanity.
+    Returns (errors: list[str], warnings: list[str]).
+    """
+    errors = []
+    warnings = []
+
+    # 1. Mandatory Fields Check
+    mandatory = ["Category", "MPN", "Manufacturer", "DigiKey", "Datasheet", "Temp_Range"]
+    for f in mandatory:
+        val = str(fields_dict.get(f, "")).strip()
+        if not val:
+            errors.append(f"Missing mandatory field: '{f}'")
+
+    # 2. Category Check
+    cat = str(fields_dict.get("Category", "")).strip()
+    if cat and cat not in CATEGORIES:
+        errors.append(f"Invalid Category '{cat}'. Must be one of: {', '.join(CATEGORIES)}")
+
+    # 3. MPN Sanity Check
+    mpn = str(fields_dict.get("MPN", "")).strip()
+    if mpn:
+        if mpn.upper().endswith("-ND"):
+            errors.append(f"MPN '{mpn}' appears to be a DigiKey part number (-ND). Place manufacturer part number in MPN, and DigiKey SKU in DigiKey field.")
+        if len(mpn) < 2:
+            errors.append(f"MPN '{mpn}' is too short.")
+
+    # 4. Manufacturer Sanity Check
+    mfr = str(fields_dict.get("Manufacturer", "")).strip()
+    if mfr and mpn and mfr.upper() == mpn.upper():
+        errors.append(f"Manufacturer cannot be identical to MPN ('{mfr}'). Please enter the actual manufacturer name.")
+
+    # 5. Datasheet Check
+    ds = str(fields_dict.get("Datasheet", "")).strip()
+    if ds:
+        parsed = urllib.parse.urlparse(ds)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            errors.append(f"Datasheet must be a valid http/https URL: '{ds}'")
+        elif not parsed.path.lower().endswith(".pdf") and not ds.lower().endswith(".pdf"):
+            errors.append(f"Datasheet URL must link to a PDF document (.pdf): '{ds}'")
+
+    # 6. Category Heuristic Cross-Check
+    if cat and mpn:
+        predicted, reason = predict_category(mpn, fields_dict, fields_dict.get("Footprint", ""), fields_dict.get("Description", ""))
+        if predicted != cat and ("Matched keywords" in reason):
+            warnings.append(f"Component '{mpn}' appears to belong in '{predicted}' instead of '{cat}' ({reason}).")
+
+    return errors, warnings
 
 
 def format_library_header():
