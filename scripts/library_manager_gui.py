@@ -42,6 +42,13 @@ from kicad_sym_utils import (
     CATEGORY_KEYWORDS
 )
 from build_symbol_libs import build_all_categories
+from test_e2e_flow import (
+    find_kicad_cli,
+    run_e2e_addition_test,
+    verify_all_library_parts,
+    verify_symbol_with_kicad_cli,
+    verify_footprint_with_kicad_cli
+)
 
 # Paths
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -628,6 +635,216 @@ class ImportPartDialog:
             messagebox.showerror("Import Error", f"Failed to save symbol to library:\n{e}")
 
 
+class E2ETestDialog:
+    """Integrated End-to-End KiCad Flow Test & Verification Dialog."""
+    def __init__(self, parent, target_part_name=None, target_category=None):
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title("🧪 KiCad End-to-End Flow Verification")
+        self.dialog.geometry("740x580")
+        self.dialog.minsize(650, 500)
+        self.dialog.configure(bg="#1e1e2e")
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+
+        self.target_part_name = target_part_name
+        self.target_category = target_category
+        self.last_rendered_svgs = []
+        self.is_running = False
+
+        self.build_ui()
+
+    def build_ui(self):
+        main_frame = ttk.Frame(self.dialog, style="Surface.TFrame", padding="16")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        header = ttk.Label(main_frame, text="🧪 End-to-End KiCad Verification Suite", style="Header.TLabel")
+        header.pack(anchor="w", pady=(0, 2))
+
+        kicad_cli_path = find_kicad_cli()
+        engine_status = f"Detected KiCad Engine: {kicad_cli_path}" if kicad_cli_path else "⚠️ KiCad CLI not found (AST validation only)"
+        engine_lbl = ttk.Label(main_frame, text=engine_status, style="Muted.TLabel")
+        engine_lbl.pack(anchor="w", pady=(0, 12))
+
+        # Action Buttons
+        btn_bar = ttk.Frame(main_frame, style="Surface.TFrame")
+        btn_bar.pack(fill=tk.X, pady=(0, 10))
+
+        self.btn_run_sim = ttk.Button(
+            btn_bar,
+            text="▶️ Test Ingestion Flow",
+            style="Success.TButton",
+            command=self.start_simulated_test
+        )
+        self.btn_run_sim.pack(side=tk.LEFT, padx=(0, 6))
+
+        self.btn_verify_all = ttk.Button(
+            btn_bar,
+            text="🔍 Verify All Library Parts",
+            style="Accent.TButton",
+            command=self.start_verify_all
+        )
+        self.btn_verify_all.pack(side=tk.LEFT, padx=6)
+
+        if self.target_part_name:
+            self.btn_target = ttk.Button(
+                btn_bar,
+                text=f"🎯 Test '{self.target_part_name}'",
+                command=self.start_test_target
+            )
+            self.btn_target.pack(side=tk.LEFT, padx=6)
+
+        self.btn_open_svg = ttk.Button(
+            btn_bar,
+            text="🖼️ View Rendered SVG",
+            state=tk.DISABLED,
+            command=self.open_svg_preview
+        )
+        self.btn_open_svg.pack(side=tk.RIGHT)
+
+        # Output Log Box
+        log_frame = ttk.Frame(main_frame, style="Surface.TFrame")
+        log_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        self.log_text = tk.Text(
+            log_frame,
+            bg="#181825",
+            fg="#cdd6f4",
+            insertbackground="#cdd6f4",
+            font=("Consolas", 10),
+            relief=tk.FLAT,
+            wrap=tk.WORD
+        )
+        self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        log_scroll = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=self.log_text.yview)
+        log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.log_text.configure(yscrollcommand=log_scroll.set)
+
+        self.log_text.tag_configure("pass", foreground="#a6e3a1")
+        self.log_text.tag_configure("fail", foreground="#f38ba8")
+        self.log_text.tag_configure("info", foreground="#89b4fa")
+        self.log_text.tag_configure("warn", foreground="#f9e2af")
+        self.log_text.tag_configure("bold", font=("Consolas", 10, "bold"))
+
+        # Status Bar
+        self.status_var = tk.StringVar(value="Ready. Select a test to run.")
+        self.status_lbl = ttk.Label(main_frame, textvariable=self.status_var, style="Surface.TLabel")
+        self.status_lbl.pack(anchor="w")
+
+    def append_log(self, text, tag=None):
+        self.log_text.insert(tk.END, text + "\n", tag)
+        self.log_text.see(tk.END)
+
+    def start_simulated_test(self):
+        if self.is_running:
+            return
+        self.is_running = True
+        self.log_text.delete("1.0", tk.END)
+        self.btn_open_svg.configure(state=tk.DISABLED)
+        self.status_var.set("Running Simulated Component Addition Flow...")
+        self.append_log("🧪 Initiating End-to-End Component Addition Test...", "info")
+        threading.Thread(target=self._worker_simulated_test, daemon=True).start()
+
+    def _worker_simulated_test(self):
+        try:
+            res = run_e2e_addition_test(keep=False, verbose=False)
+            for s in res["steps"]:
+                tag = "pass" if s["passed"] else "fail"
+                prefix = "✅" if s["passed"] else "❌"
+                self.append_log(f"  {prefix} {s['step']}: {s['details']}", tag)
+
+            if res.get("svg_dir") and os.path.isdir(res["svg_dir"]):
+                svgs = list(Path(res["svg_dir"]).glob("*.svg"))
+                if svgs:
+                    self.last_rendered_svgs = svgs
+                    self.btn_open_svg.configure(state=tk.NORMAL)
+
+            if res["success"]:
+                self.append_log("\n🎉 END-TO-END FLOW VERIFICATION PASSED!", ("pass", "bold"))
+                self.status_var.set("✅ Component flow successfully verified end-to-end.")
+            else:
+                self.append_log("\n❌ ONE OR MORE FLOW STEPS FAILED.", ("fail", "bold"))
+                self.status_var.set("❌ Verification failed. Inspect log above.")
+        except Exception as e:
+            self.append_log(f"\n❌ Error during test execution: {e}", "fail")
+            self.status_var.set("❌ Error occurred.")
+        finally:
+            self.is_running = False
+
+    def start_verify_all(self):
+        if self.is_running:
+            return
+        self.is_running = True
+        self.log_text.delete("1.0", tk.END)
+        self.btn_open_svg.configure(state=tk.DISABLED)
+        self.status_var.set("Verifying all library components with KiCad...")
+        self.append_log("🔍 Running KiCad CLI Verification Across Entire Library...", "info")
+        threading.Thread(target=self._worker_verify_all, daemon=True).start()
+
+    def _worker_verify_all(self):
+        try:
+            res = verify_all_library_parts(verbose=False)
+            for r in res["results"]:
+                tag = "pass" if r["passed"] else "fail"
+                prefix = "✅ PASS" if r["passed"] else "❌ FAIL"
+                det = "; ".join(r["details"]) if r["details"] else "OK"
+                self.append_log(f"  [{prefix}] {r['category']:10} | {r['part']:<20} -> {det}", tag)
+
+            self.append_log(f"\n📊 Summary: {res['passed']}/{res['total']} components verified.", "info")
+            if res["all_passed"]:
+                self.append_log("🎉 ALL LIBRARY COMPONENTS RECOGNIZED BY KICAD!", ("pass", "bold"))
+                self.status_var.set("✅ All library parts passed KiCad verification.")
+            else:
+                self.append_log("❌ SOME COMPONENTS FAILED VERIFICATION.", ("fail", "bold"))
+                self.status_var.set("❌ Verification failed for some components.")
+        except Exception as e:
+            self.append_log(f"\n❌ Error: {e}", "fail")
+        finally:
+            self.is_running = False
+
+    def start_test_target(self):
+        if self.is_running or not self.target_part_name:
+            return
+        self.is_running = True
+        self.log_text.delete("1.0", tk.END)
+        self.btn_open_svg.configure(state=tk.DISABLED)
+        self.status_var.set(f"Testing component '{self.target_part_name}'...")
+        self.append_log(f"🎯 Testing Component: {self.target_part_name} ({self.target_category})", "info")
+        threading.Thread(target=self._worker_test_target, daemon=True).start()
+
+    def _worker_test_target(self):
+        try:
+            kicad_cli = find_kicad_cli()
+            temp_out = Path(tempfile.mkdtemp(prefix="kicad_target_test_"))
+            lib_file = SYMBOLS_DIR / f"{CATEGORY_FILES.get(self.target_category, 'rov_power')}.kicad_sym"
+            
+            if kicad_cli and lib_file.exists():
+                sym_ok, sym_msg, svgs = verify_symbol_with_kicad_cli(kicad_cli, self.target_part_name, lib_file, temp_out)
+                tag = "pass" if sym_ok else "fail"
+                prefix = "✅" if sym_ok else "❌"
+                self.append_log(f"  {prefix} Symbol Recognition: {sym_msg}", tag)
+                if svgs:
+                    self.last_rendered_svgs = svgs
+                    self.btn_open_svg.configure(state=tk.NORMAL)
+            else:
+                self.append_log("  ⚠️ kicad-cli or category library not found.", "warn")
+
+            self.status_var.set("Verification complete.")
+        except Exception as e:
+            self.append_log(f"❌ Error: {e}", "fail")
+        finally:
+            self.is_running = False
+
+    def open_svg_preview(self):
+        if not self.last_rendered_svgs:
+            return
+        svg_path = self.last_rendered_svgs[0]
+        if svg_path.exists():
+            if sys.platform == "win32":
+                os.startfile(str(svg_path))
+            else:
+                webbrowser.open(svg_path.as_uri())
+
+
 class LibraryManagerApp:
     def __init__(self, root):
         self.root = root
@@ -693,6 +910,9 @@ class LibraryManagerApp:
 
         btn_lint = ttk.Button(toolbar, text="🔍 Validate All (Linter)", style="Accent.TButton", command=self.run_linter)
         btn_lint.pack(side=tk.LEFT, padx=5)
+
+        btn_e2e = ttk.Button(toolbar, text="🧪 Test KiCad Flow", style="Accent.TButton", command=self.open_e2e_test_dialog)
+        btn_e2e.pack(side=tk.LEFT, padx=5)
 
         btn_pr = ttk.Button(toolbar, text="🚀 Submit via PR", style="Success.TButton", command=self.create_pr_from_toolbar)
         btn_pr.pack(side=tk.LEFT, padx=5)
@@ -834,6 +1054,9 @@ class LibraryManagerApp:
 
         btn_save = ttk.Button(action_box, text="💾 Save Changes", style="Success.TButton", command=self.save_current_symbol)
         btn_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+
+        btn_test_part = ttk.Button(action_box, text="🧪 Test KiCad", command=self.test_selected_part_in_kicad)
+        btn_test_part.pack(side=tk.LEFT, padx=5)
 
         btn_delete = ttk.Button(action_box, text="🗑️ Delete Part", style="Danger.TButton", command=self.delete_current_symbol)
         btn_delete.pack(side=tk.RIGHT, padx=(5, 0))
@@ -1031,6 +1254,16 @@ class LibraryManagerApp:
             messagebox.showinfo("Linter Validation", "✅ All components across all 6 libraries are 100% compliant with structural guidelines!")
         else:
             messagebox.showwarning("Linter Violations Found", res.stderr or res.stdout)
+
+    def open_e2e_test_dialog(self):
+        E2ETestDialog(self.root)
+
+    def test_selected_part_in_kicad(self):
+        if not self.selected_symbol_name or self.selected_symbol_name not in self.symbols:
+            messagebox.showwarning("No Selection", "Please select a component from the list to test.")
+            return
+        cat = self.symbols[self.selected_symbol_name]["category"]
+        E2ETestDialog(self.root, target_part_name=self.selected_symbol_name, target_category=cat)
 
     def git_sync(self):
         try:

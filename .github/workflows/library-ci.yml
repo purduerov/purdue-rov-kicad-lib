@@ -31,3 +31,8 @@ jobs:
           python3 scripts/build_symbol_libs.py
           git diff --exit-code Symbols/*.kicad_sym
 
+      - name: Run End-to-End Component Flow & Verification Suite
+        run: |
+          python3 scripts/test_e2e_flow.py --test-addition --verify-all
+
+
