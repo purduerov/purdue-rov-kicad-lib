@@ -10,6 +10,12 @@ import sys
 import shutil
 from pathlib import Path
 
+if sys.platform == "win32":
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR / "scripts"))
 
@@ -235,20 +241,20 @@ PARTS_TO_PORT = [
 
 
 def port_all_parts():
-    print("🚀 Beginning porting of external board components into standard library...\n")
+    print("[INFO] Beginning porting of external board components into standard library...\n")
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     success_count = 0
 
     for part_def in PARTS_TO_PORT:
         name = part_def["name"]
         cat = part_def["category"]
-        print(f"📦 Processing [{cat}] {name}...")
+        print(f"[INFO] Processing [{cat}] {name}...")
 
         # 1. 3D Model
         if part_def["step_source"] and part_def["step_source"].is_file():
             dest_step = MODELS_DIR / part_def["step_name"]
             shutil.copy2(part_def["step_source"], dest_step)
-            print(f"  • 3D Model: Copied to {dest_step.relative_to(BASE_DIR)}")
+            print(f"  - 3D Model: Copied to {dest_step.relative_to(BASE_DIR)}")
 
         # 2. Footprint
         if part_def["fp_source"] and part_def["fp_source"].is_file():
@@ -260,19 +266,19 @@ def port_all_parts():
             # If 3D model exists for this part, link it in footprint
             if part_def["step_name"]:
                 link_3d_model_to_footprint(dest_fp, part_def["step_name"])
-                print(f"  • Footprint: Copied to {dest_fp.relative_to(BASE_DIR)} and linked 3D model '{part_def['step_name']}'.")
+                print(f"  - Footprint: Copied to {dest_fp.relative_to(BASE_DIR)} and linked 3D model '{part_def['step_name']}'.")
             else:
-                print(f"  • Footprint: Copied to {dest_fp.relative_to(BASE_DIR)}.")
+                print(f"  - Footprint: Copied to {dest_fp.relative_to(BASE_DIR)}.")
 
         # 3. Symbol
         if not part_def["sym_source"].is_file():
-            print(f"  ❌ Error: Source symbol file missing at {part_def['sym_source']}")
+            print(f"  [ERROR] Source symbol file missing at {part_def['sym_source']}")
             continue
 
         raw_content = part_def["sym_source"].read_text(encoding="utf-8", errors="ignore")
         extracted = extract_top_symbols(raw_content)
         if not extracted:
-            print(f"  ❌ Error: Could not extract symbol from {part_def['sym_source']}")
+            print(f"  [ERROR] Could not extract symbol from {part_def['sym_source']}")
             continue
 
         orig_name, raw_sym, _, _ = extracted[0]
@@ -288,13 +294,13 @@ def port_all_parts():
         )
         sexpr_ok, sexpr_err = validate_sexpr(wrapped)
         if not sexpr_ok:
-            print(f"  ❌ Error: Invalid S-expression syntax for {name}: {sexpr_err}")
+            print(f"  [ERROR] Invalid S-expression syntax for {name}: {sexpr_err}")
             continue
 
         # Rule validation
         errs, warns = validate_component_rules(part_def["properties"])
         if errs:
-            print(f"  ❌ Rule validation failed: {errs}")
+            print(f"  [FAIL] Rule validation failed: {errs}")
             continue
 
         # Save to Symbols/parts/<category>/<name>.kicad_sym
@@ -302,16 +308,16 @@ def port_all_parts():
         cat_folder.mkdir(parents=True, exist_ok=True)
         dest_part_file = cat_folder / f"{name}.kicad_sym"
         dest_part_file.write_text(wrapped, encoding="utf-8")
-        print(f"  • Symbol: Saved atomic part file to {dest_part_file.relative_to(BASE_DIR)}")
+        print(f"  - Symbol: Saved atomic part file to {dest_part_file.relative_to(BASE_DIR)}")
         success_count += 1
 
     # Recompile all monolithic libraries
-    print("\n🔨 Recompiling monolithic category libraries...")
+    print("\n[INFO] Recompiling monolithic category libraries...")
     summary = build_all_categories()
     for c, cnt in summary.items():
-        print(f"  • rov_{c.lower()}: {cnt} part(s)")
+        print(f"  - rov_{c.lower()}: {cnt} part(s)")
 
-    print(f"\n✅ Successfully ported {success_count}/{len(PARTS_TO_PORT)} parts into standard library!\n")
+    print(f"\n[OK] Successfully ported {success_count}/{len(PARTS_TO_PORT)} parts into standard library!\n")
     return success_count == len(PARTS_TO_PORT)
 
 

@@ -26,6 +26,12 @@ import argparse
 from pathlib import Path
 import subprocess
 
+if sys.platform == "win32":
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 # Add script directory to sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -78,7 +84,7 @@ def append_symbol_to_category(cat, sym_block):
         raise ValueError(f"Failed to generate valid S-expression for {cat}: {err}")
         
     target_sym_file.write_text(new_content, encoding='utf-8')
-    print(f"✅ Added symbol to: {target_sym_file}")
+    print(f"[OK] Added symbol to: {target_sym_file}")
 
 def copy_footprint_to_category(cat, fp_filepath):
     target_fp_dir = FOOTPRINTS_DIR / f"rov_{cat.lower()}.pretty"
@@ -86,7 +92,7 @@ def copy_footprint_to_category(cat, fp_filepath):
     
     dest_path = target_fp_dir / Path(fp_filepath).name
     shutil.copy2(fp_filepath, dest_path)
-    print(f"✅ Copied footprint to: {dest_path}")
+    print(f"[OK] Copied footprint to: {dest_path}")
     return Path(fp_filepath).stem
 
 def interactive_mode():
@@ -94,19 +100,19 @@ def interactive_mode():
     print("  Purdue ROV KiCad Library - Part Import Wizard")
     print("=" * 60)
     
-    sym_path = input("📁 Path to downloaded symbol (.kicad_sym) file (press Enter for standard Passive): ").strip('"\' ')
+    sym_path = input("Path to downloaded symbol (.kicad_sym) file (press Enter for standard Passive): ").strip('"\' ')
     if sym_path and not os.path.exists(sym_path):
-        print("❌ File not found. Please enter a valid path.")
-        sym_path = input("📁 Path to downloaded symbol (.kicad_sym) file (press Enter for standard Passive): ").strip('"\' ')
+        print("[ERROR] File not found. Please enter a valid path.")
+        sym_path = input("Path to downloaded symbol (.kicad_sym) file (press Enter for standard Passive): ").strip('"\' ')
         
-    fp_path = input("📁 Path to footprint (.kicad_mod) file (press Enter if none): ").strip('"\' ')
+    fp_path = input("Path to footprint (.kicad_mod) file (press Enter if none): ").strip('"\' ')
     if fp_path and not os.path.exists(fp_path):
-        print("⚠️ Footprint file not found, proceeding without footprint copy.")
+        print("[WARN] Footprint file not found, proceeding without footprint copy.")
         fp_path = None
 
-    model_3d_path = input("📁 Path to 3D model (.step/.stp) file (press Enter if none): ").strip('"\' ')
+    model_3d_path = input("Path to 3D model (.step/.stp) file (press Enter if none): ").strip('"\' ')
     if model_3d_path and not os.path.exists(model_3d_path):
-        print("⚠️ 3D model file not found, proceeding without 3D copy.")
+        print("[WARN] 3D model file not found, proceeding without 3D copy.")
         model_3d_path = None
 
     sym_block = None
@@ -183,7 +189,7 @@ def interactive_mode():
         updated_sym = get_standard_passive_symbol(passive_type, sym_name, field_updates)
     else:
         if not sym_block:
-            print("❌ Active/Connector/Sensor/Power parts require an input .kicad_sym file!")
+            print("[ERROR] Active/Connector/Sensor/Power parts require an input .kicad_sym file!")
             sys.exit(1)
         if mpn:
             sym_block = rename_symbol(sym_block, mpn)
@@ -191,20 +197,29 @@ def interactive_mode():
 
     append_symbol_to_category(category, updated_sym)
     
-    print("\n🔍 Running Linter Verification...")
+    print("\n[INFO] Running Linter Verification...")
     linter_script = BASE_DIR / "scripts" / "linter_validator.py"
-    result = subprocess.run([sys.executable, str(linter_script)] + [str(p) for p in SYMBOLS_DIR.glob("*.kicad_sym")])
+    sub_env = os.environ.copy()
+    sub_env["PYTHONIOENCODING"] = "utf-8"
+    sub_env["PYTHONUTF8"] = "1"
+    result = subprocess.run(
+        [sys.executable, str(linter_script)] + [str(p) for p in SYMBOLS_DIR.glob("*.kicad_sym")],
+        env=sub_env,
+        text=True,
+        encoding="utf-8",
+        errors="replace"
+    )
     
     if result.returncode == 0:
-        print("\n🎉 Part imported successfully and verified compliant!")
+        print("\n[OK] Part imported successfully and verified compliant!")
         git_commit = input("Commit & Push to master now? (y/N): ").strip().lower()
         if git_commit == 'y':
             subprocess.run(["git", "add", "Symbols/", "Footprints/", "3D_Models/"], cwd=str(BASE_DIR))
             subprocess.run(["git", "commit", "-m", f"feat(lib): add {mpn or 'new part'} to {category} library"], cwd=str(BASE_DIR))
             subprocess.run(["git", "push", "origin", "master"], cwd=str(BASE_DIR))
-            print("🚀 Pushed to remote master!")
+            print("[OK] Pushed to remote master!")
     else:
-        print("\n❌ Linter check failed. Please correct fields.")
+        print("\n[FAIL] Linter check failed. Please correct fields.")
 
 def main():
     parser = argparse.ArgumentParser(description="Import parts into Purdue ROV KiCad Library")
@@ -224,12 +239,12 @@ def main():
         return
         
     if not os.path.exists(args.symbol):
-        print(f"❌ Symbol file not found: {args.symbol}")
+        print(f"[ERROR] Symbol file not found: {args.symbol}")
         sys.exit(1)
         
     symbols = extract_symbols_from_file(args.symbol)
     if not symbols:
-        print("❌ No valid symbols found in file!")
+        print("[ERROR] No valid symbols found in file!")
         sys.exit(1)
         
     sym_block = symbols[0]

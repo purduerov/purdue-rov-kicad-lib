@@ -56,12 +56,12 @@ def build_all_categories():
                 content = f.read_text(encoding="utf-8", errors="ignore")
                 extracted = extract_top_symbols(content)
                 if not extracted:
-                    print(f"⚠️ Warning: No top-level symbol found in {f.name}")
+                    print(f"[WARN] No top-level symbol found in {f.name}")
                     continue
                 for sym_name, raw_sym, _, _ in extracted:
                     symbols_found.append((sym_name, raw_sym.strip()))
             except Exception as e:
-                print(f"❌ Error reading {f}: {e}")
+                print(f"[ERROR] Error reading {f}: {e}")
 
         # Build monolithic category library
         header = '(kicad_symbol_lib (version 20211014) (generator kicad_symbol_editor)\n'
@@ -124,12 +124,12 @@ if __name__ == "__main__":
     # Check if parts directory is currently empty
     any_parts = list(PARTS_DIR.rglob("*.kicad_sym")) if PARTS_DIR.exists() else []
     if not any_parts:
-        print("📦 Decomposing existing monolithic libraries into individual part files...")
+        print("[INFO] Decomposing existing monolithic libraries into individual part files...")
         count = decompose_existing_libraries()
-        print(f"✅ Decomposed {count} symbols into {PARTS_DIR}")
+        print(f"[OK] Decomposed {count} symbols into {PARTS_DIR}")
 
-    print("🔨 Compiling individual part files into monolithic category libraries...")
+    print("[INFO] Compiling individual part files into monolithic category libraries...")
     results = build_all_categories()
     for cat, count in results.items():
-        print(f"  • rov_{cat.lower()}: {count} component(s)")
-    print("✅ All category libraries compiled and verified!")
+        print(f"  - rov_{cat.lower()}: {count} component(s)")
+    print("[OK] All category libraries compiled and verified!")

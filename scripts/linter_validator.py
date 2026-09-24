@@ -5,6 +5,12 @@ import os
 import urllib.parse
 import glob
 
+if sys.platform == "win32":
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 # Mandatory fields that must be present in every component symbol
 MANDATORY_FIELDS = {"MPN", "Manufacturer", "Datasheet", "Temp_Range", "DigiKey", "Category"}
 
@@ -108,10 +114,10 @@ if __name__ == "__main__":
         all_errors.extend(check_kicad_symbol_file(symbols_file))
         
     if all_errors:
-        print("\n❌ Linter Verification Failed:", file=sys.stderr)
+        print("\n[ERROR] Linter Verification Failed:", file=sys.stderr)
         for err in all_errors:
             print(f" - {err}", file=sys.stderr)
         sys.exit(1)
         
-    print("\n✅ Library verified. All components compliant with structural guidelines.")
+    print("\n[OK] Library verified. All components compliant with structural guidelines.")
     sys.exit(0)

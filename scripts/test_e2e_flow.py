@@ -27,6 +27,12 @@ import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+if sys.platform == "win32":
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR / "scripts"))
 
@@ -279,19 +285,19 @@ def run_e2e_addition_test(
     def record_step(name: str, passed: bool, details: str):
         steps.append({"step": name, "passed": passed, "details": details})
         if verbose:
-            icon = "✅" if passed else "❌"
+            icon = "[PASS]" if passed else "[FAIL]"
             print(f"  {icon} [{len(steps)}/7] {name}: {details}")
 
     if verbose:
-        print(f"\n🧪 Starting End-to-End Component Addition Test: '{part_name}' -> '{category}'")
+        print(f"\n[TEST] Starting End-to-End Component Addition Test: '{part_name}' -> '{category}'")
 
     kicad_cli = find_kicad_cli()
     if kicad_cli:
         if verbose:
-            print(f"  ℹ️ Found KiCad CLI engine at: {kicad_cli}")
+            print(f"  [INFO] Found KiCad CLI engine at: {kicad_cli}")
     else:
         if verbose:
-            print("  ⚠️ KiCad CLI not detected; native rendering check will be skipped.")
+            print("  [WARN] KiCad CLI not detected; native rendering check will be skipped.")
 
     temp_out_dir = Path(tempfile.mkdtemp(prefix="kicad_e2e_test_"))
     cat_lower = category.lower()
@@ -406,7 +412,7 @@ def run_e2e_addition_test(
             if temp_out_dir.exists():
                 shutil.rmtree(temp_out_dir, ignore_errors=True)
             if verbose:
-                print(f"  🧹 Cleaned up test part '{part_name}' and restored library state.")
+                print(f"  [INFO] Cleaned up test part '{part_name}' and restored library state.")
 
 
 def verify_all_library_parts(verbose: bool = True) -> Dict:
@@ -418,11 +424,11 @@ def verify_all_library_parts(verbose: bool = True) -> Dict:
     results = []
 
     if verbose:
-        print("\n🔍 Verifying All Existing Library Components with KiCad Engine...")
+        print("\n[INFO] Verifying All Existing Library Components with KiCad Engine...")
         if kicad_cli:
-            print(f"  • KiCad CLI engine: {kicad_cli}")
+            print(f"  - KiCad CLI engine: {kicad_cli}")
         else:
-            print("  ⚠️ kicad-cli not found; checking S-expression AST syntax only.")
+            print("  [WARN] kicad-cli not found; checking S-expression AST syntax only.")
 
     parts_base = BASE_DIR / "Symbols" / "parts"
     for cat in CATEGORIES:
@@ -479,7 +485,7 @@ def verify_all_library_parts(verbose: bool = True) -> Dict:
 
                 results.append(part_res)
                 if verbose:
-                    status = "✅ PASS" if part_res["passed"] else "❌ FAIL"
+                    status = "PASS" if part_res["passed"] else "FAIL"
                     det = "; ".join(part_res["details"]) if part_res["details"] else "OK"
                     print(f"  [{status}] {cat:10} | {sym_name:<20} -> {det}")
 
@@ -489,7 +495,7 @@ def verify_all_library_parts(verbose: bool = True) -> Dict:
     passed_count = sum(1 for r in results if r["passed"])
     total_count = len(results)
     if verbose:
-        print(f"\n📊 Verification Summary: {passed_count}/{total_count} parts passed end-to-end.\n")
+        print(f"\n[INFO] Verification Summary: {passed_count}/{total_count} parts passed end-to-end.\n")
 
     return {
         "total": total_count,
@@ -557,10 +563,10 @@ def main():
             overall_ok = False
 
     if overall_ok:
-        print("🎉 ALL END-TO-END TESTS PASSED SUCCESSFULLY!")
+        print("[OK] ALL END-TO-END TESTS PASSED SUCCESSFULLY!")
         sys.exit(0)
     else:
-        print("❌ ONE OR MORE TESTS FAILED.")
+        print("[FAIL] ONE OR MORE TESTS FAILED.")
         sys.exit(1)
 
 

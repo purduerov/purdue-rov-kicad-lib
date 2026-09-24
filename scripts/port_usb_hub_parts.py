@@ -10,6 +10,12 @@ import sys
 import shutil
 from pathlib import Path
 
+if sys.platform == "win32":
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR / "scripts"))
 
@@ -184,22 +190,22 @@ SYMBOLS = [
 
 
 def port_usb_hub_components():
-    print("🚀 Porting USB Hub Board components into purdue-rov-kicad-lib...\n")
+    print("[INFO] Porting USB Hub Board components into purdue-rov-kicad-lib...\n")
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
     # Step 1: Copy 3D models
-    print("📦 Step 1: Copying 3D STEP models...")
+    print("[INFO] Step 1: Copying 3D STEP models...")
     for src_name, dst_name in STEP_MODELS:
         src_path = USB_LIB_DIR / "ROV_PCIe_USB_HUB.3d" / src_name
         if src_path.is_file():
             dst_path = MODELS_DIR / dst_name
             shutil.copy2(src_path, dst_path)
-            print(f"  • Copied 3D model: {dst_name}")
+            print(f"  - Copied 3D model: {dst_name}")
         else:
-            print(f"  ⚠️ Warning: 3D model not found at {src_path}")
+            print(f"  [WARN] 3D model not found at {src_path}")
 
     # Step 2: Copy Footprints and link 3D models
-    print("\n📦 Step 2: Copying and standardizing footprints...")
+    print("\n[INFO] Step 2: Copying and standardizing footprints...")
     for src_mod, cat, dst_mod, linked_step in FOOTPRINTS:
         src_path = USB_LIB_DIR / "ROV_PCIe_USB_HUB.pretty" / src_mod
         cat_pretty = FOOTPRINTS_DIR / f"rov_{cat.lower()}.pretty"
@@ -209,17 +215,17 @@ def port_usb_hub_components():
             shutil.copy2(src_path, dst_path)
             if linked_step:
                 link_3d_model_to_footprint(dst_path, linked_step)
-                print(f"  • Footprint: {dst_mod} -> linked 3D model '{linked_step}'")
+                print(f"  - Footprint: {dst_mod} -> linked 3D model '{linked_step}'")
             else:
-                print(f"  • Footprint: {dst_mod}")
+                print(f"  - Footprint: {dst_mod}")
         else:
-            print(f"  ⚠️ Warning: Footprint not found at {src_path}")
+            print(f"  [WARN] Footprint not found at {src_path}")
 
     # Step 3: Extract and standardize symbols
-    print("\n📦 Step 3: Standardizing symbols...")
+    print("\n[INFO] Step 3: Standardizing symbols...")
     sym_file = USB_LIB_DIR / "ROV_PCIe_USB_HUB.kicad_sym"
     if not sym_file.is_file():
-        print(f"❌ Error: Symbol file not found at {sym_file}")
+        print(f"[ERROR] Symbol file not found at {sym_file}")
         return False
 
     raw_lib = sym_file.read_text(encoding="utf-8", errors="ignore")
@@ -230,7 +236,7 @@ def port_usb_hub_components():
         tgt_name = sdef["target_name"]
         cat = sdef["category"]
         if src_name not in extracted_symbols:
-            print(f"  ❌ Error: Symbol '{src_name}' not found in source library")
+            print(f"  [ERROR] Symbol '{src_name}' not found in source library")
             continue
 
         raw_sym = extracted_symbols[src_name]
@@ -243,27 +249,27 @@ def port_usb_hub_components():
 
         sexpr_ok, sexpr_err = validate_sexpr(wrapped)
         if not sexpr_ok:
-            print(f"  ❌ Error: S-expression error for {tgt_name}: {sexpr_err}")
+            print(f"  [ERROR] Invalid S-expression error for {tgt_name}: {sexpr_err}")
             continue
 
         errs, warns = validate_component_rules(sdef["properties"])
         if errs:
-            print(f"  ❌ Rule validation failed for {tgt_name}: {errs}")
+            print(f"  [FAIL] Rule validation failed for {tgt_name}: {errs}")
             continue
 
         cat_folder = SYMBOLS_PARTS_DIR / cat.lower()
         cat_folder.mkdir(parents=True, exist_ok=True)
         dest_file = cat_folder / f"{tgt_name}.kicad_sym"
         dest_file.write_text(wrapped, encoding="utf-8")
-        print(f"  • Symbol: [{cat}] {tgt_name} -> {dest_file.name}")
+        print(f"  - Symbol: [{cat}] {tgt_name} -> {dest_file.name}")
 
     # Step 4: Recompile central category libraries
-    print("\n🔨 Step 4: Compiling monolithic category libraries...")
+    print("\n[INFO] Step 4: Compiling monolithic category libraries...")
     summary = build_all_categories()
     for c, cnt in summary.items():
-        print(f"  • rov_{c.lower()}: {cnt} part(s)")
+        print(f"  - rov_{c.lower()}: {cnt} part(s)")
 
-    print("\n✅ Porting complete!")
+    print("\n[OK] Porting complete!")
     return True
 
 

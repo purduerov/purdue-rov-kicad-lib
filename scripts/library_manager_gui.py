@@ -8,6 +8,12 @@ import os
 import sys
 from pathlib import Path
 
+if sys.platform == "win32":
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 # Add script directory for imports and check dependencies
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dependency_check import ensure_dependencies
@@ -69,7 +75,17 @@ def create_pull_request_flow(component_name, category):
     linter_script = BASE_DIR / "scripts" / "linter_validator.py"
     if linter_script.exists():
         sym_files = list(SYMBOLS_DIR.glob("*.kicad_sym"))
-        res = subprocess.run([sys.executable, str(linter_script)] + [str(p) for p in sym_files], capture_output=True, text=True)
+        sub_env = os.environ.copy()
+        sub_env["PYTHONIOENCODING"] = "utf-8"
+        sub_env["PYTHONUTF8"] = "1"
+        res = subprocess.run(
+            [sys.executable, str(linter_script)] + [str(p) for p in sym_files],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=sub_env
+        )
         if res.returncode != 0:
             err_msg = res.stderr.strip() or res.stdout.strip()
             messagebox.showerror("Linter Validation Failed", f"Cannot open Pull Request because library validation failed:\n\n{err_msg}")
@@ -117,7 +133,7 @@ def create_pull_request_flow(component_name, category):
                 "--head", branch_name,
                 "--title", f"feat(parts): add {component_name} to {category}",
                 "--body", (
-                    f"### 📦 Purdue ROV Component Ingestion\n\n"
+                    f"### Purdue ROV Component Ingestion\n\n"
                     f"- **Part:** `{component_name}`\n"
                     f"- **Category:** `{category}`\n\n"
                     f"Automated PR created via Purdue ROV Library Manager GUI."
@@ -128,7 +144,7 @@ def create_pull_request_flow(component_name, category):
             webbrowser.open(pr_url)
             messagebox.showinfo(
                 "Pull Request Created",
-                f"✅ Successfully created Pull Request via GitHub CLI!\n\n{pr_url}\n\nOpened in your browser."
+                f"Successfully created Pull Request via GitHub CLI!\n\n{pr_url}\n\nOpened in your browser."
             )
             pr_created = True
         except Exception as gh_err:
@@ -136,11 +152,11 @@ def create_pull_request_flow(component_name, category):
 
     if not pr_created:
         install_prompt = (
-            "ℹ️ GitHub CLI (`gh`) is recommended for automatic 1-click PR creation.\n\n"
+            "GitHub CLI (`gh`) is recommended for automatic 1-click PR creation.\n\n"
             "To install GitHub CLI:\n"
-            "  • Windows: winget install --id GitHub.cli\n"
-            "  • macOS:   brew install gh\n"
-            "  • Linux:   sudo apt install gh\n\n"
+            "  - Windows: winget install --id GitHub.cli\n"
+            "  - macOS:   brew install gh\n"
+            "  - Linux:   sudo apt install gh\n\n"
             "Then run in terminal: gh auth login\n\n"
             "Opening the GitHub Pull Request compare page in your browser now..."
         )
@@ -271,7 +287,7 @@ class ImportPartDialog:
     """Integrated Add / Import Part Dialog with drag-and-drop / download watcher support."""
     def __init__(self, parent, callback_on_imported):
         self.dialog = tk.Toplevel(parent)
-        self.dialog.title("➕ Add / Import Component to Library")
+        self.dialog.title("Add / Import Component to Library")
         self.dialog.geometry("640x740")
         self.dialog.minsize(580, 640)
         self.dialog.configure(bg="#1e1e2e")
@@ -304,7 +320,7 @@ class ImportPartDialog:
         drop_frame.pack(fill=tk.X, pady=(0, 10))
         drop_frame.pack_propagate(False)
 
-        self.lbl_file_status = tk.Label(drop_frame, text="📁 Click 'Browse Files...' or Drop KiCad Download ZIP here", bg="#313244", fg="#a6adc8", font=("Segoe UI", 10))
+        self.lbl_file_status = tk.Label(drop_frame, text="Click 'Browse Files...' or Drop KiCad Download ZIP here", bg="#313244", fg="#a6adc8", font=("Segoe UI", 10))
         self.lbl_file_status.pack(expand=True)
 
         browse_row = ttk.Frame(main_frame, style="Surface.TFrame")
@@ -313,7 +329,7 @@ class ImportPartDialog:
         btn_browse = ttk.Button(browse_row, text="Browse Files...", command=self.browse_files)
         btn_browse.pack(side=tk.LEFT)
 
-        self.btn_watcher = ttk.Button(browse_row, text="🟢 Start Downloads Watcher", command=self.toggle_watcher)
+        self.btn_watcher = ttk.Button(browse_row, text="[OFF] Start Downloads Watcher", command=self.toggle_watcher)
         self.btn_watcher.pack(side=tk.RIGHT)
 
         # Category Selection
@@ -383,7 +399,7 @@ class ImportPartDialog:
 
         btn_import_pr = ttk.Button(
             btn_frame,
-            text="🚀 Ingest & Open Pull Request",
+            text="Ingest & Open Pull Request",
             style="Success.TButton",
             command=lambda: self.process_import(open_pr=True)
         )
@@ -391,7 +407,7 @@ class ImportPartDialog:
 
         btn_import_local = ttk.Button(
             btn_frame,
-            text="💾 Save Locally",
+            text="Save Locally",
             command=lambda: self.process_import(open_pr=False)
         )
         btn_import_local.pack(side=tk.RIGHT, padx=5)
@@ -419,7 +435,7 @@ class ImportPartDialog:
             dest_3d = MODELS_DIR / file_path.name
             shutil.copy2(file_path, dest_3d)
             self.model_3d_file = file_path
-            self.lbl_file_status.config(text=f"🧊 3D Model Saved: {file_path.name}")
+            self.lbl_file_status.config(text=f"[3D Model Saved]: {file_path.name}")
 
     def extract_zip(self, zip_path):
         self.temp_dir = tempfile.mkdtemp()
@@ -488,8 +504,8 @@ class ImportPartDialog:
         models_label = f" | 3D: {self.model_3d_file.name}" if self.model_3d_file else ""
         autofilled_count = len(data.get("Autofilled_Fields", []))
         self.lbl_file_status.config(
-            text=f"📄 Sym: {sym_label} | 📦 FP: {fp_label}{models_label}\n"
-                 f"✨ Autofilled {autofilled_count} fields | Category: {self.selected_category.get()}"
+            text=f"Sym: {sym_label} | FP: {fp_label}{models_label}\n"
+                 f"Autofilled {autofilled_count} fields | Category: {self.selected_category.get()}"
         )
 
     def init_seen_downloads(self):
@@ -499,11 +515,11 @@ class ImportPartDialog:
     def toggle_watcher(self):
         if not self.watcher_running:
             self.watcher_running = True
-            self.btn_watcher.config(text="🔴 Stop Downloads Watcher")
+            self.btn_watcher.config(text="[ON] Stop Downloads Watcher")
             threading.Thread(target=self.watch_loop, daemon=True).start()
         else:
             self.watcher_running = False
-            self.btn_watcher.config(text="🟢 Start Downloads Watcher")
+            self.btn_watcher.config(text="[OFF] Start Downloads Watcher")
 
     def watch_loop(self):
         while self.watcher_running:
@@ -548,14 +564,14 @@ class ImportPartDialog:
         if errors:
             messagebox.showerror(
                 "Rule Validation Error - Ingestion Blocked",
-                "Please fix the following compliance errors before adding to the library:\n\n• " + "\n• ".join(errors)
+                "Please fix the following compliance errors before adding to the library:\n\n- " + "\n- ".join(errors)
             )
             return
 
         if warnings:
             confirm = messagebox.askyesno(
                 "Category Verification Warning",
-                "The following potential mismatch was detected:\n\n" + "\n".join(f"• {w}" for w in warnings) +
+                "The following potential mismatch was detected:\n\n" + "\n".join(f"- {w}" for w in warnings) +
                 f"\n\nDo you want to proceed with category '{category}' anyway?"
             )
             if not confirm:
@@ -639,7 +655,7 @@ class E2ETestDialog:
     """Integrated End-to-End KiCad Flow Test & Verification Dialog."""
     def __init__(self, parent, target_part_name=None, target_category=None):
         self.dialog = tk.Toplevel(parent)
-        self.dialog.title("🧪 KiCad End-to-End Flow Verification")
+        self.dialog.title("KiCad End-to-End Flow Verification")
         self.dialog.geometry("740x580")
         self.dialog.minsize(650, 500)
         self.dialog.configure(bg="#1e1e2e")
@@ -650,18 +666,25 @@ class E2ETestDialog:
         self.target_category = target_category
         self.last_rendered_svgs = []
         self.is_running = False
+        self.is_closed = False
 
+        self.dialog.protocol("WM_DELETE_WINDOW", self.on_close)
         self.build_ui()
+
+    def on_close(self):
+        self.is_closed = True
+        self.is_running = False
+        self.dialog.destroy()
 
     def build_ui(self):
         main_frame = ttk.Frame(self.dialog, style="Surface.TFrame", padding="16")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        header = ttk.Label(main_frame, text="🧪 End-to-End KiCad Verification Suite", style="Header.TLabel")
+        header = ttk.Label(main_frame, text="End-to-End KiCad Verification Suite", style="Header.TLabel")
         header.pack(anchor="w", pady=(0, 2))
 
         kicad_cli_path = find_kicad_cli()
-        engine_status = f"Detected KiCad Engine: {kicad_cli_path}" if kicad_cli_path else "⚠️ KiCad CLI not found (AST validation only)"
+        engine_status = f"Detected KiCad Engine: {kicad_cli_path}" if kicad_cli_path else "[WARN] KiCad CLI not found (AST validation only)"
         engine_lbl = ttk.Label(main_frame, text=engine_status, style="Muted.TLabel")
         engine_lbl.pack(anchor="w", pady=(0, 12))
 
@@ -671,7 +694,7 @@ class E2ETestDialog:
 
         self.btn_run_sim = ttk.Button(
             btn_bar,
-            text="▶️ Test Ingestion Flow",
+            text="Test Ingestion Flow",
             style="Success.TButton",
             command=self.start_simulated_test
         )
@@ -679,7 +702,7 @@ class E2ETestDialog:
 
         self.btn_verify_all = ttk.Button(
             btn_bar,
-            text="🔍 Verify All Library Parts",
+            text="Verify All Library Parts",
             style="Accent.TButton",
             command=self.start_verify_all
         )
@@ -688,14 +711,14 @@ class E2ETestDialog:
         if self.target_part_name:
             self.btn_target = ttk.Button(
                 btn_bar,
-                text=f"🎯 Test '{self.target_part_name}'",
+                text=f"Test '{self.target_part_name}'",
                 command=self.start_test_target
             )
             self.btn_target.pack(side=tk.LEFT, padx=6)
 
         self.btn_open_svg = ttk.Button(
             btn_bar,
-            text="🖼️ View Rendered SVG",
+            text="View Rendered SVG",
             state=tk.DISABLED,
             command=self.open_svg_preview
         )
@@ -731,8 +754,35 @@ class E2ETestDialog:
         self.status_lbl.pack(anchor="w")
 
     def append_log(self, text, tag=None):
-        self.log_text.insert(tk.END, text + "\n", tag)
-        self.log_text.see(tk.END)
+        if getattr(self, "is_closed", False):
+            return
+        def _do_append():
+            try:
+                if not getattr(self, "is_closed", False) and self.dialog.winfo_exists() and self.log_text.winfo_exists():
+                    self.log_text.insert(tk.END, text + "\n", tag)
+                    self.log_text.see(tk.END)
+            except Exception:
+                pass
+        try:
+            if not getattr(self, "is_closed", False) and self.dialog.winfo_exists():
+                self.dialog.after(0, _do_append)
+        except Exception:
+            pass
+
+    def set_status(self, text):
+        if getattr(self, "is_closed", False):
+            return
+        def _do_set():
+            try:
+                if not getattr(self, "is_closed", False) and self.dialog.winfo_exists():
+                    self.status_var.set(text)
+            except Exception:
+                pass
+        try:
+            if not getattr(self, "is_closed", False) and self.dialog.winfo_exists():
+                self.dialog.after(0, _do_set)
+        except Exception:
+            pass
 
     def start_simulated_test(self):
         if self.is_running:
@@ -740,33 +790,43 @@ class E2ETestDialog:
         self.is_running = True
         self.log_text.delete("1.0", tk.END)
         self.btn_open_svg.configure(state=tk.DISABLED)
-        self.status_var.set("Running Simulated Component Addition Flow...")
-        self.append_log("🧪 Initiating End-to-End Component Addition Test...", "info")
+        self.set_status("Running Simulated Component Addition Flow...")
+        self.append_log("Initiating End-to-End Component Addition Test...", "info")
         threading.Thread(target=self._worker_simulated_test, daemon=True).start()
 
     def _worker_simulated_test(self):
         try:
             res = run_e2e_addition_test(keep=False, verbose=False)
+            if getattr(self, "is_closed", False):
+                return
             for s in res["steps"]:
+                if getattr(self, "is_closed", False):
+                    return
                 tag = "pass" if s["passed"] else "fail"
-                prefix = "✅" if s["passed"] else "❌"
+                prefix = "[PASS]" if s["passed"] else "[FAIL]"
                 self.append_log(f"  {prefix} {s['step']}: {s['details']}", tag)
 
             if res.get("svg_dir") and os.path.isdir(res["svg_dir"]):
                 svgs = list(Path(res["svg_dir"]).glob("*.svg"))
-                if svgs:
+                if svgs and not getattr(self, "is_closed", False):
                     self.last_rendered_svgs = svgs
-                    self.btn_open_svg.configure(state=tk.NORMAL)
+                    try:
+                        self.dialog.after(0, lambda: self.btn_open_svg.configure(state=tk.NORMAL) if not getattr(self, "is_closed", False) else None)
+                    except Exception:
+                        pass
 
             if res["success"]:
-                self.append_log("\n🎉 END-TO-END FLOW VERIFICATION PASSED!", ("pass", "bold"))
-                self.status_var.set("✅ Component flow successfully verified end-to-end.")
+                self.append_log("\nEND-TO-END FLOW VERIFICATION PASSED!", ("pass", "bold"))
+                self.set_status("Component flow successfully verified end-to-end.")
             else:
-                self.append_log("\n❌ ONE OR MORE FLOW STEPS FAILED.", ("fail", "bold"))
-                self.status_var.set("❌ Verification failed. Inspect log above.")
+                self.append_log("\nONE OR MORE FLOW STEPS FAILED.", ("fail", "bold"))
+                self.set_status("Verification failed. Inspect log above.")
         except Exception as e:
-            self.append_log(f"\n❌ Error during test execution: {e}", "fail")
-            self.status_var.set("❌ Error occurred.")
+            try:
+                self.append_log(f"\nError during test execution: {e}", "fail")
+                self.set_status("Error occurred.")
+            except Exception:
+                pass
         finally:
             self.is_running = False
 
@@ -776,28 +836,36 @@ class E2ETestDialog:
         self.is_running = True
         self.log_text.delete("1.0", tk.END)
         self.btn_open_svg.configure(state=tk.DISABLED)
-        self.status_var.set("Verifying all library components with KiCad...")
-        self.append_log("🔍 Running KiCad CLI Verification Across Entire Library...", "info")
+        self.set_status("Verifying all library components with KiCad...")
+        self.append_log("Running KiCad CLI Verification Across Entire Library...", "info")
         threading.Thread(target=self._worker_verify_all, daemon=True).start()
 
     def _worker_verify_all(self):
         try:
             res = verify_all_library_parts(verbose=False)
+            if getattr(self, "is_closed", False):
+                return
             for r in res["results"]:
+                if getattr(self, "is_closed", False):
+                    return
                 tag = "pass" if r["passed"] else "fail"
-                prefix = "✅ PASS" if r["passed"] else "❌ FAIL"
+                prefix = "PASS" if r["passed"] else "FAIL"
                 det = "; ".join(r["details"]) if r["details"] else "OK"
                 self.append_log(f"  [{prefix}] {r['category']:10} | {r['part']:<20} -> {det}", tag)
 
-            self.append_log(f"\n📊 Summary: {res['passed']}/{res['total']} components verified.", "info")
+            self.append_log(f"\nSummary: {res['passed']}/{res['total']} components verified.", "info")
             if res["all_passed"]:
-                self.append_log("🎉 ALL LIBRARY COMPONENTS RECOGNIZED BY KICAD!", ("pass", "bold"))
-                self.status_var.set("✅ All library parts passed KiCad verification.")
+                self.append_log("ALL LIBRARY COMPONENTS RECOGNIZED BY KICAD!", ("pass", "bold"))
+                self.set_status("All library parts passed KiCad verification.")
             else:
-                self.append_log("❌ SOME COMPONENTS FAILED VERIFICATION.", ("fail", "bold"))
-                self.status_var.set("❌ Verification failed for some components.")
+                self.append_log("SOME COMPONENTS FAILED VERIFICATION.", ("fail", "bold"))
+                self.set_status("Verification failed for some components.")
         except Exception as e:
-            self.append_log(f"\n❌ Error: {e}", "fail")
+            try:
+                self.append_log(f"\nError: {e}", "fail")
+                self.set_status("Error occurred.")
+            except Exception:
+                pass
         finally:
             self.is_running = False
 
@@ -807,8 +875,8 @@ class E2ETestDialog:
         self.is_running = True
         self.log_text.delete("1.0", tk.END)
         self.btn_open_svg.configure(state=tk.DISABLED)
-        self.status_var.set(f"Testing component '{self.target_part_name}'...")
-        self.append_log(f"🎯 Testing Component: {self.target_part_name} ({self.target_category})", "info")
+        self.set_status(f"Testing component '{self.target_part_name}'...")
+        self.append_log(f"Testing Component: {self.target_part_name} ({self.target_category})", "info")
         threading.Thread(target=self._worker_test_target, daemon=True).start()
 
     def _worker_test_target(self):
@@ -819,18 +887,27 @@ class E2ETestDialog:
             
             if kicad_cli and lib_file.exists():
                 sym_ok, sym_msg, svgs = verify_symbol_with_kicad_cli(kicad_cli, self.target_part_name, lib_file, temp_out)
+                if getattr(self, "is_closed", False):
+                    return
                 tag = "pass" if sym_ok else "fail"
-                prefix = "✅" if sym_ok else "❌"
+                prefix = "[PASS]" if sym_ok else "[FAIL]"
                 self.append_log(f"  {prefix} Symbol Recognition: {sym_msg}", tag)
-                if svgs:
+                if svgs and not getattr(self, "is_closed", False):
                     self.last_rendered_svgs = svgs
-                    self.btn_open_svg.configure(state=tk.NORMAL)
+                    try:
+                        self.dialog.after(0, lambda: self.btn_open_svg.configure(state=tk.NORMAL) if not getattr(self, "is_closed", False) else None)
+                    except Exception:
+                        pass
             else:
-                self.append_log("  ⚠️ kicad-cli or category library not found.", "warn")
+                self.append_log("  kicad-cli or category library not found.", "warn")
 
-            self.status_var.set("Verification complete.")
+            self.set_status("Verification complete.")
         except Exception as e:
-            self.append_log(f"❌ Error: {e}", "fail")
+            try:
+                self.append_log(f"Error: {e}", "fail")
+                self.set_status("Error occurred.")
+            except Exception:
+                pass
         finally:
             self.is_running = False
 
@@ -902,25 +979,25 @@ class LibraryManagerApp:
         toolbar = ttk.Frame(self.root, style="Surface.TFrame", padding="10")
         toolbar.pack(fill=tk.X, side=tk.TOP)
 
-        title_lbl = ttk.Label(toolbar, text="🏛️ Purdue ROV Component Library Manager", style="Header.TLabel")
+        title_lbl = ttk.Label(toolbar, text="Purdue ROV Component Library Manager", style="Header.TLabel")
         title_lbl.pack(side=tk.LEFT, padx=(5, 20))
 
-        btn_add = ttk.Button(toolbar, text="➕ Add / Import Part", style="Success.TButton", command=self.open_add_part_dialog)
+        btn_add = ttk.Button(toolbar, text="Add / Import Part", style="Success.TButton", command=self.open_add_part_dialog)
         btn_add.pack(side=tk.LEFT, padx=5)
 
-        btn_lint = ttk.Button(toolbar, text="🔍 Validate All (Linter)", style="Accent.TButton", command=self.run_linter)
+        btn_lint = ttk.Button(toolbar, text="Validate All (Linter)", style="Accent.TButton", command=self.run_linter)
         btn_lint.pack(side=tk.LEFT, padx=5)
 
-        btn_e2e = ttk.Button(toolbar, text="🧪 Test KiCad Flow", style="Accent.TButton", command=self.open_e2e_test_dialog)
+        btn_e2e = ttk.Button(toolbar, text="Test KiCad Flow", style="Accent.TButton", command=self.open_e2e_test_dialog)
         btn_e2e.pack(side=tk.LEFT, padx=5)
 
-        btn_pr = ttk.Button(toolbar, text="🚀 Submit via PR", style="Success.TButton", command=self.create_pr_from_toolbar)
+        btn_pr = ttk.Button(toolbar, text="Submit via PR", style="Success.TButton", command=self.create_pr_from_toolbar)
         btn_pr.pack(side=tk.LEFT, padx=5)
 
-        btn_refresh = ttk.Button(toolbar, text="🔄 Reload", command=self.refresh_symbols)
+        btn_refresh = ttk.Button(toolbar, text="Reload", command=self.refresh_symbols)
         btn_refresh.pack(side=tk.LEFT, padx=5)
 
-        btn_git = ttk.Button(toolbar, text="🚀 Git Sync", command=self.git_sync)
+        btn_git = ttk.Button(toolbar, text="Git Sync", command=self.git_sync)
         btn_git.pack(side=tk.RIGHT, padx=5)
 
         paned = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
@@ -932,7 +1009,7 @@ class LibraryManagerApp:
         filter_frame = ttk.Frame(left_frame, style="Surface.TFrame")
         filter_frame.pack(fill=tk.X, pady=(0, 10))
 
-        ttk.Label(filter_frame, text="🔍 Search:", style="Surface.TLabel").pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Label(filter_frame, text="Search:", style="Surface.TLabel").pack(side=tk.LEFT, padx=(0, 5))
         self.search_var = tk.StringVar()
         self.search_var.trace_add("write", lambda *args: self.apply_filters())
         search_entry = tk.Entry(filter_frame, textvariable=self.search_var, bg="#313244", fg="#cdd6f4", insertbackground="#cdd6f4", font=("Segoe UI", 10), relief=tk.FLAT)
@@ -984,11 +1061,11 @@ class LibraryManagerApp:
 
         # Context menu
         self.context_menu = tk.Menu(self.root, tearoff=0, bg="#282a36", fg="#f8f8f2", activebackground="#bd93f9", activeforeground="#282a36")
-        self.context_menu.add_command(label="📋 Copy MPN", command=self.copy_mpn)
-        self.context_menu.add_command(label="📋 Copy DigiKey SKU", command=self.copy_digikey)
-        self.context_menu.add_command(label="🌐 Open Datasheet URL", command=self.open_datasheet)
+        self.context_menu.add_command(label="Copy MPN", command=self.copy_mpn)
+        self.context_menu.add_command(label="Copy DigiKey SKU", command=self.copy_digikey)
+        self.context_menu.add_command(label="Open Datasheet URL", command=self.open_datasheet)
         self.context_menu.add_separator()
-        self.context_menu.add_command(label="🗑️ Delete Component", command=self.delete_current_symbol)
+        self.context_menu.add_command(label="Delete Component", command=self.delete_current_symbol)
 
         self.lbl_count = ttk.Label(left_frame, text="0 components loaded", style="Muted.TLabel")
         self.lbl_count.pack(anchor="w", pady=(5, 0))
@@ -997,7 +1074,7 @@ class LibraryManagerApp:
         right_frame = ttk.Frame(paned, style="Surface.TFrame", padding=15)
         paned.add(right_frame, weight=2)
 
-        right_header = ttk.Label(right_frame, text="⚙️ Component Properties", style="Header.TLabel")
+        right_header = ttk.Label(right_frame, text="Component Properties", style="Header.TLabel")
         right_header.pack(anchor="w", pady=(0, 10))
 
         canvas = tk.Canvas(right_frame, bg="#1e1e2e", highlightthickness=0)
@@ -1046,19 +1123,19 @@ class LibraryManagerApp:
                 entry.pack(fill=tk.X, pady=(0, 4), ipady=3)
                 self.fields_entries[prop_key] = var
 
-        btn_open_ds = ttk.Button(self.form_frame, text="🌐 Open Datasheet URL", command=self.open_datasheet)
+        btn_open_ds = ttk.Button(self.form_frame, text="Open Datasheet URL", command=self.open_datasheet)
         btn_open_ds.pack(anchor="w", pady=(5, 15))
 
         action_box = ttk.Frame(right_frame, style="Surface.TFrame")
         action_box.pack(fill=tk.X, side=tk.BOTTOM, pady=(15, 0))
 
-        btn_save = ttk.Button(action_box, text="💾 Save Changes", style="Success.TButton", command=self.save_current_symbol)
+        btn_save = ttk.Button(action_box, text="Save Changes", style="Success.TButton", command=self.save_current_symbol)
         btn_save.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
 
-        btn_test_part = ttk.Button(action_box, text="🧪 Test KiCad", command=self.test_selected_part_in_kicad)
+        btn_test_part = ttk.Button(action_box, text="Test KiCad", command=self.test_selected_part_in_kicad)
         btn_test_part.pack(side=tk.LEFT, padx=5)
 
-        btn_delete = ttk.Button(action_box, text="🗑️ Delete Part", style="Danger.TButton", command=self.delete_current_symbol)
+        btn_delete = ttk.Button(action_box, text="Delete Part", style="Danger.TButton", command=self.delete_current_symbol)
         btn_delete.pack(side=tk.RIGHT, padx=(5, 0))
 
     def refresh_symbols(self):
@@ -1091,7 +1168,7 @@ class LibraryManagerApp:
                     continue
 
             is_compliant = all(props.get(f, "").strip() for f in MANDATORY_FIELDS)
-            status_icon = "✅" if is_compliant else "⚠️ Incomplete"
+            status_icon = "Compliant" if is_compliant else "Incomplete"
 
             self.filtered_symbols[name] = data
             self.tree.insert("", tk.END, iid=name, values=(name, cat, mpn, mfr, dk, status_icon))
@@ -1104,7 +1181,7 @@ class LibraryManagerApp:
             cat_counts[c] = cat_counts.get(c, 0) + 1
         
         breakdown_str = " | ".join(f"{c}: {cat_counts.get(c, 0)}" for c in CATEGORIES)
-        self.lbl_count.config(text=f"📊 Showing {count} of {len(self.symbols)} parts  [{breakdown_str}]")
+        self.lbl_count.config(text=f"Showing {count} of {len(self.symbols)} parts  [{breakdown_str}]")
 
     def focus_search(self):
         # Focus the search entry box
@@ -1192,14 +1269,14 @@ class LibraryManagerApp:
         if errors:
             messagebox.showerror(
                 "Rule Validation Error",
-                "Please correct the following compliance errors before saving:\n\n• " + "\n• ".join(errors)
+                "Please correct the following compliance errors before saving:\n\n- " + "\n- ".join(errors)
             )
             return
 
         if warnings:
             confirm = messagebox.askyesno(
                 "Category Verification Warning",
-                "The following warning was detected:\n\n" + "\n".join(f"• {w}" for w in warnings) +
+                "The following warning was detected:\n\n" + "\n".join(f"- {w}" for w in warnings) +
                 f"\n\nDo you want to proceed with category '{new_cat}' anyway?"
             )
             if not confirm:
@@ -1249,9 +1326,19 @@ class LibraryManagerApp:
             return
         
         sym_files = list(SYMBOLS_DIR.glob("*.kicad_sym"))
-        res = subprocess.run([sys.executable, str(linter_script)] + [str(p) for p in sym_files], capture_output=True, text=True)
+        sub_env = os.environ.copy()
+        sub_env["PYTHONIOENCODING"] = "utf-8"
+        sub_env["PYTHONUTF8"] = "1"
+        res = subprocess.run(
+            [sys.executable, str(linter_script)] + [str(p) for p in sym_files],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=sub_env
+        )
         if res.returncode == 0:
-            messagebox.showinfo("Linter Validation", "✅ All components across all 6 libraries are 100% compliant with structural guidelines!")
+            messagebox.showinfo("Linter Validation", "All components across all 6 libraries are 100% compliant with structural guidelines!")
         else:
             messagebox.showwarning("Linter Violations Found", res.stderr or res.stdout)
 
@@ -1287,7 +1374,7 @@ class LibraryManagerApp:
                 subprocess.run(["git", "add", "-A"], cwd=str(BASE_DIR), check=True)
                 subprocess.run(["git", "commit", "-m", "chore(lib): update central component library via Library Manager GUI"], cwd=str(BASE_DIR), check=True)
                 subprocess.run(["git", "push", "origin", "master"], cwd=str(BASE_DIR), check=True)
-                messagebox.showinfo("Git Sync", "✅ Library changes successfully committed and pushed to GitHub master!")
+                messagebox.showinfo("Git Sync", "Library changes successfully committed and pushed to GitHub master!")
         except Exception as e:
             messagebox.showerror("Git Sync Failed", f"Git operation failed:\n{e}")
 
