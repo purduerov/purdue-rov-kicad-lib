@@ -19,6 +19,7 @@ jobs:
           - X19-Pi-Shield-Board
           - X19-Power-Slab-Board
           - X19-Pressure-Chamber-Board
+          - X19-USB-Hub-Board
     steps:
       - name: Dispatch Library Update Event
         uses: peter-evans/repository-dispatch@v3
