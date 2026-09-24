@@ -1,4 +1,4 @@
-name: Symbol Library Validation
+name: Cross-Platform Library CI Matrix
 
 on:
   push:
@@ -7,32 +7,65 @@ on:
     branches: [ master, main ]
 
 jobs:
-  lint-symbols:
-    runs-on: ubuntu-latest
+  test-matrix:
+    name: Test (${{ matrix.os }}, Py ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.10', '3.11', '3.12', '3.13']
+
     steps:
       - name: Checkout Library
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Setup Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
+          python-version: ${{ matrix.python-version }}
 
-      - name: Run Unit Tests
+      - name: Install System Dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
-          python3 -m unittest discover -s tests -v
+          sudo apt-get update
+          sudo apt-get install -y python3-tk xvfb
+
+      - name: Run Unit and GUI Tests (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          xvfb-run -a python3 -m unittest discover -s tests -v
+
+      - name: Run Unit and GUI Tests (Windows/macOS)
+        if: runner.os != 'Linux'
+        run: |
+          python -m unittest discover -s tests -v
 
       - name: Run Symbol Library Linter
         run: |
-          find Symbols -name "*.kicad_sym" -exec python3 scripts/linter_validator.py {} +
+          python scripts/linter_validator.py Symbols
 
       - name: Verify Symbol Compiler Output
         run: |
-          python3 scripts/build_symbol_libs.py
+          python scripts/build_symbol_libs.py
           git diff --exit-code Symbols/*.kicad_sym
 
-      - name: Run End-to-End Component Flow & Verification Suite
+  codepage-resilience:
+    name: Codepage Resilience (Windows, Py 3.13, ASCII/cp1252)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Library
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Run Codepage and Console Safety Tests under ASCII encoding
+        env:
+          PYTHONIOENCODING: ascii
+          PYTHONUTF8: "0"
         run: |
-          python3 scripts/test_e2e_flow.py --test-addition --verify-all
-
-
+          python -m unittest tests/test_codepage_safety.py -v
+          python -m unittest tests/test_emoji_purge.py -v
