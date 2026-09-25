@@ -47,11 +47,34 @@ from kicad_sym_utils import (
     link_3d_model_to_footprint,
     CATEGORIES as ALLOWED_CATEGORIES
 )
+import rov_bridge
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 SYMBOLS_DIR = BASE_DIR / "Symbols"
 FOOTPRINTS_DIR = BASE_DIR / "Footprints"
 MANDATORY_FIELDS = ["MPN", "Manufacturer", "Datasheet", "Temp_Range", "DigiKey", "Category"]
+
+def print_contribution_hint(mpn, category):
+    """Print the safe next command for publishing a validated part.
+
+    This script writes library files and validates them; it never runs ``git
+    commit`` or ``git push``. The protected library branch is only ever changed
+    through a reviewable branch and pull request, which the shared ``rov`` CLI
+    prepares, so the concrete command is printed instead of being executed here.
+    """
+    part = str(mpn).strip() or "NEW_PART"
+    try:
+        devops_script = rov_bridge.resolve_devops_dir(BASE_DIR) / "scripts" / "rov.py"
+    except FileNotFoundError:
+        print(
+            "Set ROV_DEVOPS_DIR or run LAUNCH_KICAD once, then run "
+            "rov library contribute --push --pr"
+        )
+        return
+    print(
+        f"Library changes validated. Run: {sys.executable} {devops_script} "
+        f"library contribute --name {part} --category {category} --push --pr"
+    )
 
 def parse_existing_properties(sym_str):
     props, _ = parse_symbol_properties(sym_str)
@@ -212,12 +235,7 @@ def interactive_mode():
     
     if result.returncode == 0:
         print("\n[OK] Part imported successfully and verified compliant!")
-        git_commit = input("Commit & Push to master now? (y/N): ").strip().lower()
-        if git_commit == 'y':
-            subprocess.run(["git", "add", "Symbols/", "Footprints/", "3D_Models/"], cwd=str(BASE_DIR))
-            subprocess.run(["git", "commit", "-m", f"feat(lib): add {mpn or 'new part'} to {category} library"], cwd=str(BASE_DIR))
-            subprocess.run(["git", "push", "origin", "master"], cwd=str(BASE_DIR))
-            print("[OK] Pushed to remote master!")
+        print_contribution_hint(mpn, category)
     else:
         print("\n[FAIL] Linter check failed. Please correct fields.")
 

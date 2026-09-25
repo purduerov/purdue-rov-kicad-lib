@@ -3,16 +3,20 @@
 Unit and Integration tests for Library Manager parser, editor, and operations.
 """
 
+import io
 import os
 import sys
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 # Add scripts directory to path
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR / "scripts"))
 
 from library_manager_gui import LibraryParser, CATEGORIES, CATEGORY_FILES
+import import_part
 
 class TestLibraryManager(unittest.TestCase):
     def setUp(self):
@@ -115,6 +119,50 @@ class TestLibraryManager(unittest.TestCase):
         is_valid, err = validate_sexpr(content)
         self.assertTrue(is_valid, f"Power library became invalid S-expression: {err}")
         self.assertNotIn("#", content, "Illegal comment character found in power library")
+
+
+class TestImportPartContributionHint(unittest.TestCase):
+    """The importer must never publish to a protected branch itself.
+
+    ``import_part.py`` writes library files and runs the metadata linter; turning
+    those local changes into a branch, a commit, and a pull request is the job of
+    ``rov library contribute``. These tests pin that division of work.
+    """
+
+    def test_importer_never_runs_git_publishing_commands(self):
+        source = Path(import_part.__file__).read_text(encoding="utf-8")
+        for forbidden in ('"git", "push"', '"git", "commit"', '"git", "add"', '"git", "checkout"'):
+            self.assertNotIn(
+                forbidden, source, f"import_part.py must not run {forbidden}"
+            )
+
+    def test_hint_prints_concrete_rov_command(self):
+        output = self._hint_output(devops="C:/devops/DevOps")
+        self.assertIn("Library changes validated. Run:", output)
+        self.assertIn("C:/devops/DevOps", output.replace("\\", "/"))
+        self.assertIn(
+            "library contribute --name TPS54302 --category Power --push --pr", output
+        )
+
+    def test_hint_explains_how_to_locate_devops_when_unresolved(self):
+        output = self._hint_output(devops=None)
+        self.assertIn("Set ROV_DEVOPS_DIR or run LAUNCH_KICAD once", output)
+        self.assertIn("rov library contribute --push --pr", output)
+
+    def _hint_output(self, devops):
+        """Return the printed hint with the DevOps resolver patched."""
+
+        def fake_resolve(_library_dir):
+            if devops is None:
+                raise FileNotFoundError("no DevOps checkout found")
+            return Path(devops)
+
+        buffer = io.StringIO()
+        with patch.object(import_part.rov_bridge, "resolve_devops_dir", fake_resolve):
+            with redirect_stdout(buffer):
+                import_part.print_contribution_hint("TPS54302", "Power")
+        return buffer.getvalue()
+
 
 if __name__ == "__main__":
     unittest.main()

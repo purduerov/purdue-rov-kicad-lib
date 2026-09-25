@@ -55,6 +55,7 @@ from test_e2e_flow import (
     verify_symbol_with_kicad_cli,
     verify_footprint_with_kicad_cli
 )
+import rov_bridge
 
 # Paths
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -66,110 +67,50 @@ DOWNLOADS_DIR = Path.home() / "Downloads"
 
 
 
-def create_pull_request_flow(component_name, category):
+def _run_rov_action(title, arguments):
+    """Run one shared ``rov`` command and report it; return True on success.
+
+    Every Git action in this GUI goes through the central CLI, which lives in a
+    separate repository. The success path prints the CLI's own status text rather
+    than opening a modal dialog so a headless or scripted run is never blocked on
+    a window; a failure is still surfaced as a dialog because it needs a
+    decision. There is deliberately no fallback to a direct commit or push: the
+    protected library branch is never published from here.
     """
-    Verifies linter compliance, stages library changes, creates a dedicated git branch,
-    pushes to origin, and opens a GitHub Pull Request via gh CLI (or browser fallback).
-    """
-    # 1. Run linter pre-check across all symbols
-    linter_script = BASE_DIR / "scripts" / "linter_validator.py"
-    if linter_script.exists():
-        sym_files = list(SYMBOLS_DIR.glob("*.kicad_sym"))
-        sub_env = os.environ.copy()
-        sub_env["PYTHONIOENCODING"] = "utf-8"
-        sub_env["PYTHONUTF8"] = "1"
-        res = subprocess.run(
-            [sys.executable, str(linter_script)] + [str(p) for p in sym_files],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env=sub_env
-        )
-        if res.returncode != 0:
-            err_msg = res.stderr.strip() or res.stdout.strip()
-            messagebox.showerror("Linter Validation Failed", f"Cannot open Pull Request because library validation failed:\n\n{err_msg}")
-            return False
-
-    # 2. Check for working tree changes
     try:
-        status = subprocess.check_output(["git", "status", "--porcelain"], cwd=str(BASE_DIR), text=True)
-        if not status.strip():
-            messagebox.showinfo("No Changes", "No modified or uncommitted library files found to include in a Pull Request.")
-            return False
-    except Exception as e:
-        messagebox.showerror("Git Error", f"Failed to check git status:\n{e}")
+        result = rov_bridge.run_rov(BASE_DIR, arguments)
+    except FileNotFoundError as exc:
+        messagebox.showerror(title, str(exc))
         return False
-
-    # 3. Create a unique branch name
-    clean_name = re.sub(r'[^a-zA-Z0-9_\-]', '', str(component_name)).strip('-') or "component"
-    timestamp = int(time.time()) % 100000
-    branch_name = f"add-part-{clean_name.lower()}-{timestamp}"
-
-    try:
-        subprocess.run(["git", "checkout", "-b", branch_name], cwd=str(BASE_DIR), check=True)
-        subprocess.run(["git", "add", "Symbols", "Footprints", "3D_Models"], cwd=str(BASE_DIR), check=True)
-        commit_msg = f"feat(parts): add {component_name} to {category}"
-        subprocess.run(["git", "commit", "-m", commit_msg], cwd=str(BASE_DIR), check=True)
-        subprocess.run(["git", "push", "-u", "origin", branch_name], cwd=str(BASE_DIR), check=True)
-    except Exception as e:
-        messagebox.showerror("Git Push Failed", f"Failed to create or push branch '{branch_name}':\n{e}")
-        try:
-            subprocess.run(["git", "checkout", "master"], cwd=str(BASE_DIR))
-        except Exception:
-            pass
+    except OSError as exc:
+        messagebox.showerror(title, f"The DevOps CLI could not be started: {exc}")
         return False
-
-    # 4. Open Pull Request via gh CLI or fallback to Browser
-    pr_compare_url = f"https://github.com/purduerov/purdue-rov-kicad-lib/compare/master...{branch_name}?expand=1"
-    gh_path = shutil.which("gh")
-    pr_created = False
-
-    if gh_path:
-        try:
-            gh_cmd = [
-                "gh", "pr", "create",
-                "--base", "master",
-                "--head", branch_name,
-                "--title", f"feat(parts): add {component_name} to {category}",
-                "--body", (
-                    f"### Purdue ROV Component Ingestion\n\n"
-                    f"- **Part:** `{component_name}`\n"
-                    f"- **Category:** `{category}`\n\n"
-                    f"Automated PR created via Purdue ROV Library Manager GUI."
-                )
-            ]
-            res = subprocess.run(gh_cmd, cwd=str(BASE_DIR), capture_output=True, text=True, check=True)
-            pr_url = res.stdout.strip()
-            webbrowser.open(pr_url)
-            messagebox.showinfo(
-                "Pull Request Created",
-                f"Successfully created Pull Request via GitHub CLI!\n\n{pr_url}\n\nOpened in your browser."
-            )
-            pr_created = True
-        except Exception as gh_err:
-            print("gh pr create failed:", gh_err)
-
-    if not pr_created:
-        install_prompt = (
-            "GitHub CLI (`gh`) is recommended for automatic 1-click PR creation.\n\n"
-            "To install GitHub CLI:\n"
-            "  - Windows: winget install --id GitHub.cli\n"
-            "  - macOS:   brew install gh\n"
-            "  - Linux:   sudo apt install gh\n\n"
-            "Then run in terminal: gh auth login\n\n"
-            "Opening the GitHub Pull Request compare page in your browser now..."
-        )
-        messagebox.showinfo("Opening Pull Request in Browser", install_prompt)
-        webbrowser.open(pr_compare_url)
-
-    # 5. Return to master
-    try:
-        subprocess.run(["git", "checkout", "master"], cwd=str(BASE_DIR), check=True)
-    except Exception:
-        pass
-
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip() or "no output"
+        messagebox.showerror(title, f"'rov {' '.join(arguments)}' did not complete:\n\n{detail}")
+        return False
+    summary = (result.stdout or "").strip() or "completed successfully"
+    print(f"[PASS] rov {' '.join(arguments)}: {summary}")
     return True
+
+
+def create_pull_request_flow(component_name, category):
+    """Prepare, publish, and review a new part through ``rov library contribute``.
+
+    The branch, the commit, the push, and the pull request are all prepared by
+    the shared CLI, which validates the symbol metadata, stages only the library
+    directories, and opens the pull request against the protected ``master``
+    branch instead of pushing to it. Returns True when the CLI succeeded.
+    """
+    return _run_rov_action(
+        "Library Contribution Failed",
+        [
+            "library", "contribute",
+            "--name", str(component_name),
+            "--category", str(category),
+            "--push", "--pr",
+        ],
+    )
 
 
 CATEGORY_FILES = {
@@ -1353,30 +1294,14 @@ class LibraryManagerApp:
         E2ETestDialog(self.root, target_part_name=self.selected_symbol_name, target_category=cat)
 
     def git_sync(self):
-        try:
-            subprocess.run(["git", "pull", "--rebase", "origin", "master"], cwd=str(BASE_DIR), check=True)
-            status = subprocess.check_output(["git", "status", "--porcelain"], cwd=str(BASE_DIR), text=True)
-            if not status.strip():
-                messagebox.showinfo("Git Sync", "Library is already up to date with remote master. No local changes to commit.")
-                return
+        """Fast-forward the library to the approved revision through the rov CLI.
 
-            ask_pr = messagebox.askyesno(
-                "Submit via Pull Request?",
-                "Local library changes detected!\n\n"
-                "Would you like to submit these changes via a Pull Request? (Recommended)\n\n"
-                "Select 'Yes' to open a PR branch, or 'No' to push directly to master."
-            )
-            if ask_pr:
-                sym_name = self.selected_symbol_name or "Library_Update"
-                cat = self.fields_entries["Category"].get() if self.selected_symbol_name else "General"
-                create_pull_request_flow(sym_name, cat)
-            else:
-                subprocess.run(["git", "add", "-A"], cwd=str(BASE_DIR), check=True)
-                subprocess.run(["git", "commit", "-m", "chore(lib): update central component library via Library Manager GUI"], cwd=str(BASE_DIR), check=True)
-                subprocess.run(["git", "push", "origin", "master"], cwd=str(BASE_DIR), check=True)
-                messagebox.showinfo("Git Sync", "Library changes successfully committed and pushed to GitHub master!")
-        except Exception as e:
-            messagebox.showerror("Git Sync Failed", f"Git operation failed:\n{e}")
+        ``rov library sync`` only fetches and fast-forwards a clean checkout; it
+        never pushes. Local changes are published through the Submit via PR
+        button, which prepares a reviewable branch and pull request instead of
+        writing to the protected ``master`` branch.
+        """
+        _run_rov_action("Git Sync Failed", ["library", "sync"])
 
 
 if __name__ == "__main__":

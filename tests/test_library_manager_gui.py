@@ -215,14 +215,28 @@ class TestLibraryManagerGui(unittest.TestCase):
         self.app.create_pr_from_toolbar()
         mock_pr_flow.assert_called_once_with(first_sym, self.app.symbols[first_sym]["category"])
 
-    @patch("library_manager_gui.subprocess.run")
-    @patch("library_manager_gui.subprocess.check_output", return_value="")
-    @patch("library_manager_gui.messagebox.showinfo")
-    def test_git_sync_clean(self, mock_info, mock_status, mock_run):
-        """Verifies git_sync pulls cleanly when working tree has no changes."""
+    @patch("library_manager_gui.rov_bridge.run_rov")
+    def test_git_sync_delegates_to_rov(self, mock_run):
+        """Verifies git_sync delegates to the shared rov library sync command."""
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = "library is current"
+        mock_run.return_value.stderr = ""
         self.app.git_sync()
-        mock_run.assert_called_once()
-        mock_info.assert_called_once()
+        self.assertIn("library", mock_run.call_args.args[1])
+        self.assertIn("sync", mock_run.call_args.args[1])
+
+    @patch("library_manager_gui.rov_bridge.run_rov")
+    def test_create_pr_delegates_to_rov(self, mock_run):
+        """Verifies the pull request flow delegates to rov library contribute."""
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = "https://github.com/purduerov/purdue-rov-kicad-lib/pull/1"
+        mock_run.return_value.stderr = ""
+        library_manager_gui.create_pull_request_flow("TPS54302", "Power")
+        args = mock_run.call_args.args[1]
+        self.assertIn("contribute", args)
+        self.assertIn("--name", args)
+        self.assertIn("--push", args)
+        self.assertIn("--pr", args)
 
     @patch("library_manager_gui.ImportPartDialog")
     def test_open_add_part_dialog(self, mock_dialog):
