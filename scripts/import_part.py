@@ -294,7 +294,12 @@ def main():
     
     # Run linter
     linter_script = BASE_DIR / "scripts" / "linter_validator.py"
-    subprocess.run([sys.executable, str(linter_script)] + [str(p) for p in SYMBOLS_DIR.glob("*.kicad_sym")])
+    result = subprocess.run([sys.executable, str(linter_script)] + [str(p) for p in SYMBOLS_DIR.glob("*.kicad_sym")])
+    if result.returncode == 0:
+        print("[OK] Part imported successfully and verified compliant!")
+        print_contribution_hint(field_updates["MPN"], category)
+    else:
+        print("[FAIL] Linter check failed. Please correct fields.")
 
 if __name__ == "__main__":
     main()

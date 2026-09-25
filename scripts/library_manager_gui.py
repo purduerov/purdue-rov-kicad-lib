@@ -67,40 +67,111 @@ DOWNLOADS_DIR = Path.home() / "Downloads"
 
 
 
-def _run_rov_action(title, arguments):
-    """Run one shared ``rov`` command and report it; return True on success.
+ROV_ACTION_TIMEOUT_SECONDS = rov_bridge.ROV_BRIDGE_TIMEOUT_SECONDS
 
-    Every Git action in this GUI goes through the central CLI, which lives in a
-    separate repository. The success path prints the CLI's own status text rather
-    than opening a modal dialog so a headless or scripted run is never blocked on
-    a window; a failure is still surfaced as a dialog because it needs a
-    decision. There is deliberately no fallback to a direct commit or push: the
-    protected library branch is never published from here.
+
+def _extract_http_url(text):
+    """Return the last http/https URL in CLI output, or an empty string.
+
+    Only an http or https URL is ever handed to the browser, so a summary line
+    that merely mentions a branch name can never become a browser target.
     """
-    try:
-        result = rov_bridge.run_rov(BASE_DIR, arguments)
-    except FileNotFoundError as exc:
-        messagebox.showerror(title, str(exc))
-        return False
-    except OSError as exc:
-        messagebox.showerror(title, f"The DevOps CLI could not be started: {exc}")
+    matches = re.findall(r"https?://\S+", text or "")
+    return matches[-1].rstrip(".,;)\"'") if matches else ""
+
+
+def _report_rov_action(title, arguments, error, result, success_title):
+    """Report one finished bridge action. Runs on the Tk main thread.
+
+    Success is reported in a message box again, and a pull request URL is opened
+    in the browser, so the Library Manager gives the same feedback it always did.
+    Every failure keeps its actionable dialog, and there is deliberately no
+    fallback to a direct commit or push: the protected library branch is never
+    published from here.
+    """
+    if error is not None:
+        messagebox.showerror(title, error)
         return False
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip() or "no output"
         messagebox.showerror(title, f"'rov {' '.join(arguments)}' did not complete:\n\n{detail}")
         return False
     summary = (result.stdout or "").strip() or "completed successfully"
+    url = _extract_http_url(summary)
+    if url:
+        webbrowser.open(url)
+        messagebox.showinfo(success_title or title, f"{summary}\n\nOpened in your browser: {url}")
+    else:
+        messagebox.showinfo(success_title or title, summary)
     print(f"[PASS] rov {' '.join(arguments)}: {summary}")
     return True
 
 
-def create_pull_request_flow(component_name, category):
+def _run_rov_action(title, arguments, root=None, success_title=None):
+    """Run one shared ``rov`` command without freezing the window.
+
+    The CLI validates, commits, pushes, and may open a pull request, so it runs
+    on a daemon worker thread and every Tk, message box, and browser call is
+    marshalled back to the main thread with ``root.after(0, ...)``. The call is
+    additionally bounded by ``ROV_ACTION_TIMEOUT_SECONDS`` inside the bridge, so
+    a hung remote is reported rather than waited on forever.
+
+    Returns the worker ``threading.Thread`` when ``root`` is given, and otherwise
+    the boolean outcome of the synchronous run for callers that have no window.
+    """
+    outcome = {}
+
+    def work():
+        try:
+            outcome["error"] = None
+            outcome["result"] = rov_bridge.run_rov(
+                BASE_DIR, arguments, timeout=ROV_ACTION_TIMEOUT_SECONDS
+            )
+        except FileNotFoundError as exc:
+            outcome["error"] = str(exc)
+        except OSError as exc:
+            outcome["error"] = f"The DevOps CLI could not be started: {exc}"
+
+    def finish():
+        return _report_rov_action(
+            title,
+            arguments,
+            outcome.get("error"),
+            outcome.get("result"),
+            success_title,
+        )
+
+    if root is None:
+        work()
+        return finish()
+
+    def worker_target():
+        work()
+        _on_main_thread(root, finish)
+
+    worker = threading.Thread(target=worker_target, daemon=True)
+    worker.start()
+    return worker
+
+
+def _on_main_thread(root, callback):
+    """Queue ``callback`` on the Tk main loop, or run it if the window is gone."""
+    try:
+        root.after(0, callback)
+    except Exception:
+        # A destroyed or unusable window must not leave a result unreported, and
+        # must not raise on a worker thread either.
+        callback()
+
+
+def create_pull_request_flow(component_name, category, root=None):
     """Prepare, publish, and review a new part through ``rov library contribute``.
 
     The branch, the commit, the push, and the pull request are all prepared by
     the shared CLI, which validates the symbol metadata, stages only the library
     directories, and opens the pull request against the protected ``master``
-    branch instead of pushing to it. Returns True when the CLI succeeded.
+    branch instead of pushing to it. Pass the window as ``root`` to run the CLI
+    off the main thread.
     """
     return _run_rov_action(
         "Library Contribution Failed",
@@ -110,6 +181,8 @@ def create_pull_request_flow(component_name, category):
             "--category", str(category),
             "--push", "--pr",
         ],
+        root=root,
+        success_title="Pull Request Created",
     )
 
 
@@ -1236,7 +1309,7 @@ class LibraryManagerApp:
     def create_pr_from_toolbar(self):
         sym_name = self.selected_symbol_name or "Component_Update"
         cat = self.fields_entries["Category"].get() if self.selected_symbol_name else "General"
-        create_pull_request_flow(sym_name, cat)
+        create_pull_request_flow(sym_name, cat, root=self.root)
 
     def delete_current_symbol(self):
         if not self.selected_symbol_name or self.selected_symbol_name not in self.symbols:
@@ -1297,11 +1370,15 @@ class LibraryManagerApp:
         """Fast-forward the library to the approved revision through the rov CLI.
 
         ``rov library sync`` only fetches and fast-forwards a clean checkout; it
-        never pushes. Local changes are published through the Submit via PR
-        button, which prepares a reviewable branch and pull request instead of
-        writing to the protected ``master`` branch.
+        never pushes. It runs on a worker thread so the window stays responsive
+        while the remote is contacted, and the result is reported here when it
+        finishes. Local changes are published through the Submit via PR button,
+        which prepares a reviewable branch and pull request instead of writing to
+        the protected ``master`` branch.
         """
-        _run_rov_action("Git Sync Failed", ["library", "sync"])
+        return _run_rov_action(
+            "Git Sync Failed", ["library", "sync"], root=self.root, success_title="Git Sync"
+        )
 
 
 if __name__ == "__main__":

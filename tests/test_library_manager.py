@@ -5,7 +5,10 @@ Unit and Integration tests for Library Manager parser, editor, and operations.
 
 import io
 import os
+import shutil
+import subprocess
 import sys
+import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -129,6 +132,15 @@ class TestImportPartContributionHint(unittest.TestCase):
     ``rov library contribute``. These tests pin that division of work.
     """
 
+    # A throwaway part number that cannot collide with a real library part, and
+    # the symbol is removed again in tearDown so the suite leaves no change
+    # behind in the repository it runs against.
+    PART_NAME = "ZZTEST-ROV-HINT-0001"
+
+    def tearDown(self):
+        for cat in CATEGORIES:
+            LibraryParser.delete_symbol(self.PART_NAME, cat)
+
     def test_importer_never_runs_git_publishing_commands(self):
         source = Path(import_part.__file__).read_text(encoding="utf-8")
         for forbidden in ('"git", "push"', '"git", "commit"', '"git", "add"', '"git", "checkout"'):
@@ -141,13 +153,88 @@ class TestImportPartContributionHint(unittest.TestCase):
         self.assertIn("Library changes validated. Run:", output)
         self.assertIn("C:/devops/DevOps", output.replace("\\", "/"))
         self.assertIn(
-            "library contribute --name TPS54302 --category Power --push --pr", output
+            f"library contribute --name {self.PART_NAME} --category Power --push --pr", output
         )
 
     def test_hint_explains_how_to_locate_devops_when_unresolved(self):
         output = self._hint_output(devops=None)
         self.assertIn("Set ROV_DEVOPS_DIR or run LAUNCH_KICAD once", output)
         self.assertIn("rov library contribute --push --pr", output)
+
+    def test_non_interactive_import_prints_the_same_hint_after_validation(self):
+        """The argument-driven path gives the same next step as the wizard."""
+        source_file = self._write_source_symbol()
+        calls = []
+
+        def fake_linter(*_args, **_kwargs):
+            calls.append(True)
+            return subprocess.CompletedProcess([], 0, "", "")
+
+        argv = self._import_argv(source_file)
+        buffer = io.StringIO()
+        with patch.object(sys, "argv", argv), patch.object(
+            import_part.subprocess, "run", fake_linter
+        ), patch.object(
+            import_part.rov_bridge, "resolve_devops_dir", lambda _d: Path("C:/devops/DevOps")
+        ):
+            with redirect_stdout(buffer):
+                import_part.main()
+
+        self.assertTrue(calls, "the non-interactive path must still run the linter")
+        output = buffer.getvalue()
+        self.assertIn("Library changes validated. Run:", output)
+        self.assertIn(
+            f"library contribute --name {self.PART_NAME} --category Power --push --pr", output
+        )
+
+    def test_non_interactive_import_reports_a_failing_linter_without_a_hint(self):
+        """A failing linter is reported and no next command is suggested."""
+        source_file = self._write_source_symbol()
+
+        def fake_linter(*_args, **_kwargs):
+            return subprocess.CompletedProcess([], 1, "", "missing mandatory field: MPN")
+
+        argv = self._import_argv(source_file)
+        buffer = io.StringIO()
+        with patch.object(sys, "argv", argv), patch.object(
+            import_part.subprocess, "run", fake_linter
+        ), patch.object(
+            import_part.rov_bridge, "resolve_devops_dir", lambda _d: Path("C:/devops/DevOps")
+        ):
+            with redirect_stdout(buffer):
+                import_part.main()
+
+        output = buffer.getvalue()
+        self.assertIn("[FAIL] Linter check failed", output)
+        self.assertNotIn("Library changes validated. Run:", output)
+
+    def _import_argv(self, source_file):
+        """Return the argument list the importer is driven with."""
+        return [
+            "import_part.py",
+            "--symbol", str(source_file),
+            "--category", "Power",
+            "--mpn", self.PART_NAME,
+        ]
+
+    def _write_source_symbol(self):
+        """Write a throwaway source symbol file for the import arguments."""
+        temp_dir = tempfile.mkdtemp(prefix="rov-import-test-")
+        self.addCleanup(shutil.rmtree, temp_dir, True)
+        path = Path(temp_dir) / "source.kicad_sym"
+        path.write_text(
+            '(kicad_symbol_lib\n  (version 20211014)\n'
+            f'  (symbol "{self.PART_NAME}"\n'
+            f'    (property "MPN" "{self.PART_NAME}" (id 5) (at 0 0 0) (effects (font (size 1.27 1.27)) hide))\n'
+            '    (property "Manufacturer" "Test Vendor" (id 6) (at 0 0 0) (effects (font (size 1.27 1.27)) hide))\n'
+            '    (property "DigiKey" "000-00000-ND" (id 7) (at 0 0 0) (effects (font (size 1.27 1.27)) hide))\n'
+            '    (property "Datasheet" "https://example.invalid/datasheet.pdf" (id 3) (at 0 0 0) (effects (font (size 1.27 1.27)) hide))\n'
+            '    (property "Temp_Range" "-40C to 125C" (id 8) (at 0 0 0) (effects (font (size 1.27 1.27)) hide))\n'
+            '    (property "Category" "Power" (id 4) (at 0 0 0) (effects (font (size 1.27 1.27)) hide))\n'
+            '  )\n)\n',
+            encoding="utf-8",
+        )
+        return path
 
     def _hint_output(self, devops):
         """Return the printed hint with the DevOps resolver patched."""
@@ -160,7 +247,7 @@ class TestImportPartContributionHint(unittest.TestCase):
         buffer = io.StringIO()
         with patch.object(import_part.rov_bridge, "resolve_devops_dir", fake_resolve):
             with redirect_stdout(buffer):
-                import_part.print_contribution_hint("TPS54302", "Power")
+                import_part.print_contribution_hint(self.PART_NAME, "Power")
         return buffer.getvalue()
 
 

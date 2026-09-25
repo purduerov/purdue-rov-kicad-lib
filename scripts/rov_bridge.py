@@ -41,6 +41,13 @@ LEGACY_DIR_NAME = "pcb-devops"
 # The single shared entry point, relative to a DevOps checkout.
 CLI_RELATIVE_PATH = Path("scripts") / "rov.py"
 
+# Every run is bounded. ``rov library sync`` reaches a remote and
+# ``rov library contribute`` validates, commits, pushes, and may open a pull
+# request, so a caller must never be able to wait on a hung or unreachable CLI
+# forever. The bound is generous enough for a real validation plus a GitHub
+# round trip, and a caller that needs longer can pass its own value.
+ROV_BRIDGE_TIMEOUT_SECONDS = 900
+
 MISSING_CLI_HINT = (
     "Run LAUNCH_KICAD once, or set ROV_DEVOPS_DIR to the KiCad/DevOps checkout, "
     "then run this action again."
@@ -87,6 +94,7 @@ def run_rov(
     args: list[str],
     check: bool = False,
     devops_dir: Path | None = None,
+    timeout: float | None = ROV_BRIDGE_TIMEOUT_SECONDS,
 ) -> subprocess.CompletedProcess[str]:
     """Run one ``rov`` command in ``library_dir`` and capture its output.
 
@@ -94,6 +102,13 @@ def run_rov(
     name or category is passed as a single argument and can never be interpreted
     by a shell. ``check`` is ``False`` by default so a caller can turn a non-zero
     exit code into its own ``PASS``/``BLOCKED`` report instead of an exception.
+
+    ``timeout`` is bounded by default so an unreachable remote or a hung CLI is
+    reported instead of blocking the caller. It is passed straight to
+    ``subprocess`` and the child is killed when it expires; the timeout is then
+    returned as an ordinary failed result, carrying the reason in ``stderr``, so
+    every caller can report it the same way as any other failure. Pass ``None``
+    only when waiting without a bound is genuinely intended.
     """
     devops = Path(devops_dir) if devops_dir is not None else resolve_devops_dir(library_dir)
     command = [
@@ -101,12 +116,30 @@ def run_rov(
         str(devops / CLI_RELATIVE_PATH),
         *[str(argument) for argument in args],
     ]
-    return subprocess.run(
-        command,
-        cwd=str(library_dir),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=check,
+    try:
+        return subprocess.run(
+            command,
+            cwd=str(library_dir),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=check,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return _timed_out(command, timeout)
+
+
+def _timed_out(command: list[str], timeout: float | None) -> subprocess.CompletedProcess[str]:
+    """Return a failed result for a CLI that outlived its time budget."""
+    limit = f"{timeout} seconds" if timeout is not None else "its time budget"
+    return subprocess.CompletedProcess(
+        args=command,
+        returncode=1,
+        stdout="",
+        stderr=(
+            f"rov did not finish within {limit} and was stopped. Check the network and "
+            "whether the DevOps CLI is waiting for input, then run this action again.\n"
+        ),
     )

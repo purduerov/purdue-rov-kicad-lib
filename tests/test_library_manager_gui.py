@@ -4,7 +4,9 @@ Comprehensive Headless Button and Flow Integration Test Suite for LibraryManager
 Verifies all buttons, callbacks, filters, and dialog flows headlessly.
 """
 
+import subprocess
 import sys
+import threading
 import unittest
 from unittest.mock import patch, MagicMock
 from pathlib import Path
@@ -15,6 +17,15 @@ sys.path.insert(0, str(BASE_DIR / "scripts"))
 
 import library_manager_gui
 from library_manager_gui import LibraryManagerApp, ImportPartDialog, E2ETestDialog
+
+
+def _dialog_text(mock_dialog):
+    """Return every text fragment passed to a patched message box."""
+    return " ".join(
+        str(part)
+        for call in mock_dialog.call_args_list
+        for part in (call.args[1:] if len(call.args) > 1 else ())
+    )
 
 
 class TestLibraryManagerGui(unittest.TestCase):
@@ -213,30 +224,122 @@ class TestLibraryManagerGui(unittest.TestCase):
         self.app.on_symbol_select(None)
 
         self.app.create_pr_from_toolbar()
-        mock_pr_flow.assert_called_once_with(first_sym, self.app.symbols[first_sym]["category"])
+        self.assertEqual(mock_pr_flow.call_args.args, (first_sym, self.app.symbols[first_sym]["category"]))
+        self.assertIs(mock_pr_flow.call_args.kwargs["root"], self.root)
 
+    @patch("library_manager_gui.webbrowser.open")
+    @patch("library_manager_gui.messagebox.showinfo")
     @patch("library_manager_gui.rov_bridge.run_rov")
-    def test_git_sync_delegates_to_rov(self, mock_run):
+    def test_git_sync_delegates_to_rov(self, mock_run, mock_info, mock_browser):
         """Verifies git_sync delegates to the shared rov library sync command."""
         mock_run.return_value.returncode = 0
         mock_run.return_value.stdout = "library is current"
         mock_run.return_value.stderr = ""
-        self.app.git_sync()
+
+        worker = self.app.git_sync()
+        self._finish(worker)
+
         self.assertIn("library", mock_run.call_args.args[1])
         self.assertIn("sync", mock_run.call_args.args[1])
+        mock_info.assert_called_once()
+        self.assertIn("library is current", _dialog_text(mock_info))
+        mock_browser.assert_not_called()
 
+    @patch("library_manager_gui.webbrowser.open")
+    @patch("library_manager_gui.messagebox.showinfo")
     @patch("library_manager_gui.rov_bridge.run_rov")
-    def test_create_pr_delegates_to_rov(self, mock_run):
+    def test_create_pr_delegates_to_rov(self, mock_run, mock_info, mock_browser):
         """Verifies the pull request flow delegates to rov library contribute."""
+        pr_url = "https://github.com/purduerov/purdue-rov-kicad-lib/pull/1"
         mock_run.return_value.returncode = 0
-        mock_run.return_value.stdout = "https://github.com/purduerov/purdue-rov-kicad-lib/pull/1"
+        mock_run.return_value.stdout = pr_url
         mock_run.return_value.stderr = ""
+
         library_manager_gui.create_pull_request_flow("TPS54302", "Power")
+
         args = mock_run.call_args.args[1]
         self.assertIn("contribute", args)
         self.assertIn("--name", args)
         self.assertIn("--push", args)
         self.assertIn("--pr", args)
+        # Success feedback is restored: the pull request URL is reported in a
+        # message box and opened in the browser.
+        mock_info.assert_called_once()
+        self.assertIn(pr_url, _dialog_text(mock_info))
+        mock_browser.assert_called_once_with(pr_url)
+
+    @patch("library_manager_gui.webbrowser.open")
+    @patch("library_manager_gui.messagebox.showinfo")
+    @patch("library_manager_gui.rov_bridge.run_rov")
+    def test_create_pr_opens_the_browser_only_for_an_http_url(self, mock_run, mock_info, mock_browser):
+        """A non-URL summary is reported but never handed to the browser."""
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = "prepared add-part-tps54302-4242 with 1 library file(s)"
+        mock_run.return_value.stderr = ""
+
+        library_manager_gui.create_pull_request_flow("TPS54302", "Power")
+
+        mock_info.assert_called_once()
+        self.assertIn("add-part-tps54302-4242", _dialog_text(mock_info))
+        mock_browser.assert_not_called()
+
+    @patch("library_manager_gui.webbrowser.open")
+    @patch("library_manager_gui.messagebox.showerror")
+    @patch("library_manager_gui.rov_bridge.run_rov")
+    def test_create_pr_reports_a_refusal_without_opening_a_browser(self, mock_run, mock_error, mock_browser):
+        """A blocked contribution is shown as an error and opens nothing."""
+        mock_run.return_value.returncode = 2
+        mock_run.return_value.stdout = ""
+        mock_run.return_value.stderr = "[BLOCKED] library-contribute: changes are outside the library directories"
+
+        library_manager_gui.create_pull_request_flow("TPS54302", "Power")
+
+        mock_error.assert_called_once()
+        self.assertIn("outside the library directories", _dialog_text(mock_error))
+        mock_browser.assert_not_called()
+
+    @patch("library_manager_gui.webbrowser.open")
+    @patch("library_manager_gui.messagebox.showerror")
+    @patch("library_manager_gui.rov_bridge.run_rov")
+    def test_git_sync_reports_a_missing_devops_checkout(self, mock_run, mock_error, mock_browser):
+        """A missing DevOps checkout is an actionable dialog, never a direct push."""
+        mock_run.side_effect = FileNotFoundError(
+            "The Purdue ROV DevOps CLI was not found.\n"
+            "Checked:\n  C:/Libraries/.pcb-devops-cache/scripts/rov.py\n"
+            "Run LAUNCH_KICAD once, or set ROV_DEVOPS_DIR to the KiCad/DevOps checkout, "
+            "then run this action again."
+        )
+
+        worker = self.app.git_sync()
+        self._finish(worker)
+
+        mock_error.assert_called_once()
+        self.assertIn("ROV_DEVOPS_DIR", _dialog_text(mock_error))
+        self.assertIn("LAUNCH_KICAD", _dialog_text(mock_error))
+        mock_browser.assert_not_called()
+
+    @patch("library_manager_gui.webbrowser.open")
+    @patch("library_manager_gui.messagebox.showerror")
+    @patch("library_manager_gui.rov_bridge.run_rov")
+    def test_git_sync_reports_a_timeout_as_a_failure(self, mock_run, mock_error, mock_browser):
+        """A bounded timeout surfaces as an ordinary reported failure."""
+        mock_run.return_value.returncode = 1
+        mock_run.return_value.stdout = ""
+        mock_run.return_value.stderr = "rov did not finish within 900 seconds"
+
+        worker = self.app.git_sync()
+        self._finish(worker)
+
+        mock_error.assert_called_once()
+        self.assertIn("did not finish within", _dialog_text(mock_error))
+        mock_browser.assert_not_called()
+
+    def _finish(self, worker):
+        """Wait for a bridge worker and let the Tk main thread run its callback."""
+        if worker is not None:
+            worker.join(timeout=10)
+            self.assertFalse(worker.is_alive(), "the bridge worker must not block the UI")
+        self.root.update()
 
     @patch("library_manager_gui.ImportPartDialog")
     def test_open_add_part_dialog(self, mock_dialog):
@@ -275,6 +378,121 @@ class TestLibraryManagerGui(unittest.TestCase):
         dlg.toggle_watcher()
         self.assertFalse(dlg.watcher_running)
         dlg.on_close()
+
+
+class FakeRoot:
+    """A stand-in Tk root that records ``after`` callbacks instead of running them.
+
+    It needs no display, which is what makes the threading contract testable on a
+    headless machine: the worker finishes, the callback is queued, and the test
+    decides when the "main thread" runs it.
+    """
+
+    def __init__(self):
+        self.pending = []
+
+    def after(self, _milliseconds, func, *args):
+        self.pending.append((func, args))
+        return "after#1"
+
+
+class TestRovActionThreading(unittest.TestCase):
+    """A bridge action must never run the CLI on the Tk main thread.
+
+    These tests create no window and start no real process, so they are safe on a
+    headless Linux runner as well as a desktop.
+    """
+
+    def test_the_bridge_runs_on_a_worker_and_finishes_on_the_main_thread(self):
+        caller = threading.current_thread()
+        worker_threads = []
+        root = FakeRoot()
+
+        def fake_run(_library_dir, _args, **_kwargs):
+            worker_threads.append(threading.current_thread())
+            return subprocess.CompletedProcess([], 0, "library is current", "")
+
+        with patch.object(library_manager_gui.rov_bridge, "run_rov", fake_run), patch.object(
+            library_manager_gui.messagebox, "showinfo"
+        ) as mock_info:
+            worker = library_manager_gui._run_rov_action(
+                "Git Sync Failed", ["library", "sync"], root=root
+            )
+
+            self.assertIsInstance(worker, threading.Thread)
+            self.assertTrue(worker.daemon, "the worker must not keep the app alive")
+            worker.join(timeout=10)
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(len(worker_threads), 1)
+            self.assertIsNot(worker_threads[0], caller, "the CLI must not run on the caller's thread")
+            # Nothing is reported until the main thread runs the queued callback.
+            mock_info.assert_not_called()
+            self.assertEqual(len(root.pending), 1)
+
+            root.pending.pop(0)[0]()
+
+        mock_info.assert_called_once()
+        self.assertIn("library is current", _dialog_text(mock_info))
+
+    def test_the_worker_is_given_a_bounded_timeout(self):
+        captured = {}
+
+        def fake_run(_library_dir, _args, **kwargs):
+            captured.update(kwargs)
+            return subprocess.CompletedProcess([], 0, "ok", "")
+
+        root = FakeRoot()
+        with patch.object(library_manager_gui.rov_bridge, "run_rov", fake_run):
+            worker = library_manager_gui._run_rov_action("t", ["library", "sync"], root=root)
+            worker.join(timeout=10)
+
+        timeout = captured.get("timeout")
+        self.assertIsInstance(timeout, (int, float), f"no bounded timeout was passed: {captured}")
+        self.assertGreater(timeout, 0)
+
+    def test_a_failed_worker_still_reports_on_the_main_thread(self):
+        root = FakeRoot()
+
+        def fake_run(_library_dir, _args, **_kwargs):
+            return subprocess.CompletedProcess([], 2, "", "[BLOCKED] library-sync: local changes")
+
+        with patch.object(library_manager_gui.rov_bridge, "run_rov", fake_run), patch.object(
+            library_manager_gui.messagebox, "showerror"
+        ) as mock_error:
+            worker = library_manager_gui._run_rov_action("Git Sync Failed", ["library", "sync"], root=root)
+            worker.join(timeout=10)
+            self.assertEqual(len(root.pending), 1)
+            root.pending.pop(0)[0]()
+
+        mock_error.assert_called_once()
+        self.assertIn("local changes", _dialog_text(mock_error))
+
+    def test_an_unexpected_worker_error_is_reported_not_raised(self):
+        root = FakeRoot()
+
+        def fake_run(*_args, **_kwargs):
+            raise OSError("the interpreter could not be started")
+
+        with patch.object(library_manager_gui.rov_bridge, "run_rov", fake_run), patch.object(
+            library_manager_gui.messagebox, "showerror"
+        ) as mock_error:
+            worker = library_manager_gui._run_rov_action("t", ["library", "sync"], root=root)
+            worker.join(timeout=10)
+            root.pending.pop(0)[0]()
+
+        mock_error.assert_called_once()
+        self.assertIn("could not be started", _dialog_text(mock_error))
+
+    def test_without_a_root_the_action_stays_synchronous(self):
+        """A caller with no Tk window still gets a completed result."""
+        with patch.object(library_manager_gui.rov_bridge, "run_rov") as mock_run, patch.object(
+            library_manager_gui.messagebox, "showinfo"
+        ) as mock_info:
+            mock_run.return_value = subprocess.CompletedProcess([], 0, "library is current", "")
+            outcome = library_manager_gui._run_rov_action("t", ["library", "sync"])
+
+        self.assertIs(outcome, True)
+        mock_info.assert_called_once()
 
 
 if __name__ == "__main__":
