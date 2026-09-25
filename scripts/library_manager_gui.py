@@ -308,6 +308,10 @@ class ImportPartDialog:
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
+        # The application window is kept, not the Toplevel: the import flow closes
+        # this dialog before it launches a pull request, and a destroyed Toplevel
+        # cannot marshal a result back to the Tk main loop.
+        self.parent = parent
         self.callback_on_imported = callback_on_imported
         self.sym_file = None
         self.fp_file = None
@@ -657,7 +661,10 @@ class ImportPartDialog:
 
             if open_pr:
                 self.on_close()
-                create_pull_request_flow(sym_name, category)
+                # The application parent, never the Toplevel just destroyed: the
+                # contribution runs on a worker thread and reports back through
+                # this window, so the Tk main thread is not blocked.
+                create_pull_request_flow(sym_name, category, root=self.parent)
             else:
                 messagebox.showinfo("Success", f"Component '{sym_name}' successfully added locally to {category} library!")
                 self.on_close()

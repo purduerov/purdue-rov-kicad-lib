@@ -4,9 +4,12 @@ Comprehensive Headless Button and Flow Integration Test Suite for LibraryManager
 Verifies all buttons, callbacks, filters, and dialog flows headlessly.
 """
 
+import shutil
 import subprocess
 import sys
+import tempfile
 import threading
+import time
 import unittest
 from unittest.mock import patch, MagicMock
 from pathlib import Path
@@ -493,6 +496,184 @@ class TestRovActionThreading(unittest.TestCase):
 
         self.assertIs(outcome, True)
         mock_info.assert_called_once()
+
+
+class _Var:
+    """A stand-in for a ``tk.StringVar`` that needs no display."""
+
+    def __init__(self, value=""):
+        self._value = value
+
+    def get(self):
+        return self._value
+
+
+class _FakeImportDialog:
+    """A stand-in ``ImportPartDialog`` that needs no window.
+
+    ``process_import`` is exercised as an unbound function against this object, so
+    the call site that decides how the pull request is launched is tested without
+    a Toplevel, a grab_set, or a display.
+    """
+
+    def __init__(self, parent, symbol_file, part_name, category="Power"):
+        self.parent = parent
+        self.dialog = None
+        self.selected_category = _Var(category)
+        self.entries = {
+            "MPN": _Var(part_name),
+            "Manufacturer": _Var("Test Vendor"),
+            "DigiKey": _Var("000-00000-ND"),
+            "Datasheet": _Var("https://example.invalid/datasheet.pdf"),
+            "Temp_Range": _Var("-40C to 125C"),
+        }
+        self.sym_file = symbol_file
+        self.fp_file = None
+        self.model_3d_file = None
+        self.callback_on_imported = None
+        self.closed = False
+
+    def on_close(self):
+        self.closed = True
+
+
+class TestImportDialogPullRequestRoot(unittest.TestCase):
+    """The import dialog must not run the contribution on the main thread.
+
+    ``process_import(open_pr=True)`` closes its Toplevel before launching the
+    contribution, so it cannot pass the Toplevel as the Tk root. It has to pass
+    the application parent it was constructed with, which keeps the worker
+    thread and ``root.after(0, ...)`` path in use. No display, process, or
+    remote is involved.
+    """
+
+    def setUp(self):
+        temp_dir = tempfile.mkdtemp(prefix="rov-import-dialog-")
+        self.addCleanup(shutil.rmtree, temp_dir, True)
+        self.part_name = "ZZDIALOG-IMPORT-0001"
+        symbol_file = Path(temp_dir) / "part.kicad_sym"
+        # The same text is handed to the real extract/rename/inject helpers, so
+        # the symbol name, and therefore the part name sent to the CLI, is the one
+        # these tests assert on.
+        self.symbol_text = (
+            '(kicad_symbol_lib\n  (version 20211014)\n'
+            f'  (symbol "{self.part_name}"\n'
+            f'    (property "MPN" "{self.part_name}" (id 5) (at 0 0 0) (effects (font (size 1.27 1.27)) hide))\n'
+            '    (property "Manufacturer" "Test Vendor" (id 6) (at 0 0 0) (effects (font (size 1.27 1.27)) hide))\n'
+            '    (property "DigiKey" "000-00000-ND" (id 7) (at 0 0 0) (effects (font (size 1.27 1.27)) hide))\n'
+            '    (property "Datasheet" "https://example.invalid/datasheet.pdf" (id 3) (at 0 0 0) (effects (font (size 1.27 1.27)) hide))\n'
+            '    (property "Temp_Range" "-40C to 125C" (id 8) (at 0 0 0) (effects (font (size 1.27 1.27)) hide))\n'
+            '    (property "Category" "Power" (id 4) (at 0 0 0) (effects (font (size 1.27 1.27)) hide))\n'
+            '  )\n)\n'
+        )
+        symbol_file.write_text(self.symbol_text, encoding="utf-8")
+        self.app_root = FakeRoot()
+        self.dialog = _FakeImportDialog(self.app_root, symbol_file, self.part_name)
+
+    def _import_and_capture(self, open_pr=True):
+        """Run ``process_import`` and return the recorded pull request call."""
+        recorded = {}
+        real_flow = library_manager_gui.create_pull_request_flow
+        threads = {}
+
+        def spy(component_name, category, root=None):
+            recorded["component_name"] = component_name
+            recorded["category"] = category
+            recorded["root"] = root
+            recorded["root_given"] = root is not None
+            threads["call_site"] = threading.current_thread()
+            return real_flow(component_name, category, root=root)
+
+        def fake_run(_library_dir, _args, **_kwargs):
+            # Where the CLI actually ran is the thing under test.
+            threads["bridge"] = threading.current_thread()
+            return subprocess.CompletedProcess(
+                [], 0, "https://github.com/purduerov/purdue-rov-kicad-lib/pull/9", ""
+            )
+
+        with patch.object(library_manager_gui, "create_pull_request_flow", spy), patch.object(
+            library_manager_gui.rov_bridge, "run_rov", fake_run
+        ), patch.object(library_manager_gui, "validate_component_rules", return_value=([], [])), patch.object(
+            library_manager_gui, "validate_sexpr", return_value=(True, "")
+        ), patch.object(library_manager_gui.LibraryParser, "insert_symbol") as mock_insert, patch.object(
+            library_manager_gui.messagebox, "showinfo"
+        ) as mock_info, patch.object(
+            # An error or a confirmation prompt here would block on a modal window
+            # forever in a headless run, so both are captured and asserted on.
+            library_manager_gui.messagebox, "showerror"
+        ) as mock_error, patch.object(
+            library_manager_gui.messagebox, "askyesno", return_value=True
+        ) as mock_confirm, patch.object(
+            library_manager_gui.webbrowser, "open"
+        ) as mock_browser:
+            library_manager_gui.ImportPartDialog.process_import(self.dialog, open_pr=open_pr)
+            self._drain_worker()
+            recorded["threads"] = threads
+            recorded["inserted"] = mock_insert
+            recorded["info"] = mock_info
+            recorded["error"] = mock_error
+            recorded["confirm"] = mock_confirm
+            recorded["browser"] = mock_browser
+        # The import must have reached the save step, not bailed out early.
+        self.assertEqual(
+            mock_error.call_args_list,
+            [],
+            f"process_import reported an error instead of importing: {mock_error.call_args_list}",
+        )
+        return recorded
+
+    def _drain_worker(self):
+        """Let the worker finish and run the callback it queued on the fake root."""
+        deadline = time.monotonic() + 10
+        while not self.app_root.pending and time.monotonic() < deadline:
+            time.sleep(0.01)
+        for callback, _args in list(self.app_root.pending):
+            callback()
+        self.app_root.pending.clear()
+
+    def test_open_pr_passes_the_application_root(self):
+        """The application parent, not the destroyed Toplevel, is the Tk root."""
+        recorded = self._import_and_capture(open_pr=True)
+
+        self.assertTrue(self.dialog.closed, "the import dialog closes before the PR flow")
+        self.assertTrue(recorded.get("root_given"), "no root was passed to create_pull_request_flow")
+        self.assertIs(
+            recorded["root"],
+            self.app_root,
+            "the application parent root must be the Tk root, not the closed Toplevel",
+        )
+        self.assertIsNot(recorded["root"], self.dialog.dialog)
+        self.assertEqual(recorded["component_name"], self.part_name)
+        self.assertEqual(recorded["category"], "Power")
+        # The whole point: the CLI did not run on the caller's thread.
+        self.assertIsNot(
+            recorded["threads"]["bridge"],
+            recorded["threads"]["call_site"],
+            "the contribution ran on the caller's thread instead of a worker",
+        )
+
+    def test_open_pr_reports_through_the_main_thread_and_opens_the_pull_request(self):
+        """The threaded path is used and the restored feedback still happens."""
+        recorded = self._import_and_capture(open_pr=True)
+
+        recorded["info"].assert_called_once()
+        self.assertIn("pull/9", _dialog_text(recorded["info"]))
+        recorded["browser"].assert_called_once_with(
+            "https://github.com/purduerov/purdue-rov-kicad-lib/pull/9"
+        )
+
+    def test_open_pr_does_not_write_to_the_real_symbol_files(self):
+        """The call site is exercised without touching the real library."""
+        recorded = self._import_and_capture(open_pr=True)
+
+        recorded["inserted"].assert_called_once()
+
+    def test_without_open_pr_no_pull_request_is_launched(self):
+        """The plain import path is unchanged and launches nothing."""
+        recorded = self._import_and_capture(open_pr=False)
+
+        self.assertNotIn("root_given", recorded)
+        self.assertEqual(self.app_root.pending, [])
 
 
 if __name__ == "__main__":
