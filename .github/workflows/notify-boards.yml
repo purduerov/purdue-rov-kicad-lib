@@ -10,10 +10,20 @@ on:
     branches: [master]
   workflow_dispatch:
 
+# A GITHUB_TOKEN cannot dispatch an event into another repository, so this job
+# holds no workflow-token permissions at all. It depends on ORG_DISPATCH_TOKEN or
+# PAT_TOKEN, and the warning below says so when neither is configured.
+permissions: {}
+
 jobs:
   dispatch-update:
-    # A manual dispatch always runs; an automatic run needs a green library CI.
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    # A manual dispatch always runs. An automatic run needs a green library CI
+    # for a push: a re-run of an old pull_request workflow_run is not an
+    # approved library revision.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -28,6 +38,17 @@ jobs:
           - X19-Pressure-Chamber-Board
           - X19-USB-Hub-Board
     steps:
+      - name: Warn About Token Fallback
+        # Without an org or personal token the dispatch below can only use the
+        # GITHUB_TOKEN, which cannot reach another repository. Say so instead of
+        # letting every board look silently skipped.
+        if: ${{ env.ORG_DISPATCH_TOKEN == '' && env.PAT_TOKEN == '' }}
+        env:
+          ORG_DISPATCH_TOKEN: ${{ secrets.ORG_DISPATCH_TOKEN }}
+          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+        run: |
+          echo "::warning::Neither ORG_DISPATCH_TOKEN nor PAT_TOKEN is configured. The GITHUB_TOKEN fallback cannot dispatch to another repository, so the board repositories will not be notified."
+
       - name: Dispatch Library Update Event
         uses: peter-evans/repository-dispatch@v3
         continue-on-error: true

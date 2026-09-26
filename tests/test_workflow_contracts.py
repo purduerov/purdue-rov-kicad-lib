@@ -1,8 +1,10 @@
-"""Contract test for the board notification trigger.
+"""Contract tests for the library automation workflows.
 
 Boards must only be told to update after the approved library revision has
 actually passed validation, so a failed library CI run never fans out update
-requests to eight repositories.
+requests to eight repositories. The library CI must also be able to parse the
+workflow YAML it is responsible for, so the parser it installs is asserted here
+too.
 """
 
 import unittest
@@ -10,11 +12,12 @@ from pathlib import Path
 
 try:
     import yaml
-except ImportError:  # The library CI installs no packages, so this stays optional.
+except ImportError:  # Installed by the library CI; a local run may not have it.
     yaml = None
 
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOW = ROOT / ".github/workflows/notify-boards.yml"
+LIBRARY_CI_WORKFLOW = ROOT / ".github/workflows/library-ci.yml"
 
 
 class TestNotifyWorkflowContract(unittest.TestCase):
@@ -60,6 +63,51 @@ class TestNotifyWorkflowContract(unittest.TestCase):
     def test_dispatch_tolerates_an_unreachable_repository(self):
         self.assertIn("continue-on-error: true", self.text)
         self.assertIn("update-library", self.text)
+
+    def test_notification_uses_no_workflow_token_permissions(self):
+        # A GITHUB_TOKEN cannot dispatch into another repository, so the job is
+        # given no token permissions and relies on the org or personal token.
+        self.assertIn("permissions: {}", self.text)
+
+    def test_notification_ignores_non_push_library_ci_runs(self):
+        # The library CI also answers pull_request events. A re-run of an old
+        # pull_request workflow_run must not look like an approved push.
+        self.assertIn("github.event.workflow_run.event == 'push'", self.text)
+        self.assertIn("github.event.workflow_run.conclusion == 'success'", self.text)
+        self.assertIn("github.event_name == 'workflow_dispatch'", self.text)
+
+    def test_token_fallback_is_warned_about(self):
+        self.assertIn("ORG_DISPATCH_TOKEN", self.text)
+        self.assertIn("PAT_TOKEN", self.text)
+        self.assertIn("::warning::", self.text)
+
+
+class TestLibraryCiContract(unittest.TestCase):
+    """The library CI must be able to parse the workflows it validates."""
+
+    def setUp(self):
+        self.text = LIBRARY_CI_WORKFLOW.read_text(encoding="utf-8")
+
+    def test_workflow_tests_install_the_yaml_parser_first(self):
+        # The workflow contract tests parse the workflow YAML. Without the
+        # parser in CI they would silently skip, so the install is required and
+        # has to run before the tests.
+        install = self.text.index("pip install pyyaml")
+        tests = self.text.index("-m unittest discover -s tests -v")
+        self.assertLess(install, tests, "PyYAML must be installed before the tests run")
+        self.assertIn("python -m pip install --upgrade pip", self.text)
+
+    def test_no_new_dependency_is_added_to_the_library_scripts(self):
+        # Only the test-time parser is added, exactly once, and the library
+        # scripts keep running on the standard library alone.
+        installs = [
+            line.strip()
+            for line in self.text.splitlines()
+            if line.strip().startswith("pip install")
+        ]
+        self.assertEqual(["pip install pyyaml"], installs)
+        self.assertNotIn("pip install -r", self.text)
+        self.assertNotIn("requirements", self.text)
 
     def test_workflow_parses(self):
         if yaml is None:
