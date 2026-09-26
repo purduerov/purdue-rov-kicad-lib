@@ -55,6 +55,12 @@ SYMBOLS_DIR = BASE_DIR / "Symbols"
 FOOTPRINTS_DIR = BASE_DIR / "Footprints"
 MANDATORY_FIELDS = ["MPN", "Manufacturer", "Datasheet", "Temp_Range", "DigiKey", "Category"]
 
+def run_shared_validation():
+    """Validate the library through the shared CLI and return code and output."""
+    result = rov_bridge.run_rov(BASE_DIR, ["library", "validate"])
+    output = (result.stdout or "") + (result.stderr or "")
+    return result.returncode, output
+
 def shell_join(command):
     """Render an argument list as one copy-pasteable command line.
 
@@ -242,19 +248,9 @@ def interactive_mode():
     append_symbol_to_category(category, updated_sym)
     
     print("\n[INFO] Running Linter Verification...")
-    linter_script = BASE_DIR / "scripts" / "linter_validator.py"
-    sub_env = os.environ.copy()
-    sub_env["PYTHONIOENCODING"] = "utf-8"
-    sub_env["PYTHONUTF8"] = "1"
-    result = subprocess.run(
-        [sys.executable, str(linter_script)] + [str(p) for p in SYMBOLS_DIR.glob("*.kicad_sym")],
-        env=sub_env,
-        text=True,
-        encoding="utf-8",
-        errors="replace"
-    )
-    
-    if result.returncode == 0:
+    returncode, _ = run_shared_validation()
+
+    if returncode == 0:
         print("\n[OK] Part imported successfully and verified compliant!")
         print_contribution_hint(mpn, category)
     else:
@@ -314,9 +310,8 @@ def main():
     append_symbol_to_category(category, updated_sym)
     
     # Run linter
-    linter_script = BASE_DIR / "scripts" / "linter_validator.py"
-    result = subprocess.run([sys.executable, str(linter_script)] + [str(p) for p in SYMBOLS_DIR.glob("*.kicad_sym")])
-    if result.returncode == 0:
+    returncode, _ = run_shared_validation()
+    if returncode == 0:
         print("[OK] Part imported successfully and verified compliant!")
         print_contribution_hint(field_updates["MPN"], category)
     else:

@@ -203,14 +203,14 @@ class TestImportPartContributionHint(unittest.TestCase):
         source_file = self._write_source_symbol()
         calls = []
 
-        def fake_linter(*_args, **_kwargs):
+        def fake_validate(*_args, **_kwargs):
             calls.append(True)
             return subprocess.CompletedProcess([], 0, "", "")
 
         argv = self._import_argv(source_file)
         buffer = io.StringIO()
         with patch.object(sys, "argv", argv), patch.object(
-            import_part.subprocess, "run", fake_linter
+            import_part.rov_bridge, "run_rov", fake_validate
         ), patch.object(
             import_part.rov_bridge, "resolve_devops_dir", lambda _d: Path("C:/devops/DevOps")
         ):
@@ -228,13 +228,13 @@ class TestImportPartContributionHint(unittest.TestCase):
         """A failing linter is reported and no next command is suggested."""
         source_file = self._write_source_symbol()
 
-        def fake_linter(*_args, **_kwargs):
+        def fake_validate(*_args, **_kwargs):
             return subprocess.CompletedProcess([], 1, "", "missing mandatory field: MPN")
 
         argv = self._import_argv(source_file)
         buffer = io.StringIO()
         with patch.object(sys, "argv", argv), patch.object(
-            import_part.subprocess, "run", fake_linter
+            import_part.rov_bridge, "run_rov", fake_validate
         ), patch.object(
             import_part.rov_bridge, "resolve_devops_dir", lambda _d: Path("C:/devops/DevOps")
         ):
@@ -320,6 +320,33 @@ class TestImportPartContributionHint(unittest.TestCase):
             "--push", "--pr",
         ]
         return command if os.name != "nt" else import_part.shell_join(command)
+
+
+class TestSharedValidation(unittest.TestCase):
+    def test_success_returns_zero_and_output(self):
+        from unittest.mock import MagicMock
+
+        proc = MagicMock()
+        proc.returncode = 0
+        proc.stdout = "Validation successful!"
+        proc.stderr = ""
+        with patch.object(import_part.rov_bridge, "run_rov", return_value=proc) as mock_run:
+            code, output = import_part.run_shared_validation()
+        mock_run.assert_called_once_with(import_part.BASE_DIR, ["library", "validate"])
+        self.assertEqual(0, code)
+        self.assertIn("Validation successful!", output)
+
+    def test_failure_returns_nonzero(self):
+        from unittest.mock import MagicMock
+
+        proc = MagicMock()
+        proc.returncode = 1
+        proc.stdout = ""
+        proc.stderr = "Rule violation"
+        with patch.object(import_part.rov_bridge, "run_rov", return_value=proc):
+            code, output = import_part.run_shared_validation()
+        self.assertEqual(1, code)
+        self.assertIn("Rule violation", output)
 
 
 if __name__ == "__main__":
