@@ -110,10 +110,20 @@ class TestNotifyWorkflowContract(unittest.TestCase):
         self.assertIn("github.event.workflow_run.conclusion == 'success'", self.text)
         self.assertIn("github.event_name == 'workflow_dispatch'", self.text)
 
-    def test_token_fallback_is_warned_about(self):
-        self.assertIn("ORG_DISPATCH_TOKEN", self.text)
-        self.assertIn("PAT_TOKEN", self.text)
-        self.assertIn("::warning::", self.text)
+    def test_notification_needs_no_token_secret(self):
+        """The dispatch runs on the built-in token, so no secret has to exist.
+
+        This workflow used to claim that a GITHUB_TOKEN cannot dispatch into
+        another repository and to warn that the boards would go unnotified. That
+        was never true here: a run with no ORG_DISPATCH_TOKEN or PAT_TOKEN
+        configured reached all eight board repositories. The false warning and
+        the two secret names are gone, so a member is not sent to create a
+        personal access token the system does not need.
+        """
+        self.assertNotIn("ORG_DISPATCH_TOKEN", self.text)
+        self.assertNotIn("PAT_TOKEN", self.text)
+        self.assertNotIn("Warn About Token Fallback", self.text)
+        self.assertIn("token: ${{ secrets.GITHUB_TOKEN }}", self.text)
 
 
 class TestLibraryCiContract(unittest.TestCase):
