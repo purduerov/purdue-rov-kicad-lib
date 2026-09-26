@@ -7,6 +7,9 @@ workflow YAML it is responsible for, so the parser it installs is asserted here
 too.
 """
 
+import shutil
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -64,6 +67,37 @@ class TestNotifyWorkflowContract(unittest.TestCase):
         self.assertIn("continue-on-error: true", self.text)
         self.assertIn("update-library", self.text)
 
+    def test_a_failed_dispatch_fails_the_job(self):
+        """Important I6: a green run must mean every board was notified.
+
+        `continue-on-error: true` keeps one unreachable repository from hiding
+        the other seven, but on its own it also turned a dispatch that never
+        reached the board into a successful run. A member watching the library
+        repository had no way to tell that a board's scheduled update was never
+        triggered. The dispatch step's own outcome is therefore checked, and a
+        failure both annotates the run and fails the job.
+        """
+        self.assertIn("id: dispatch", self.text)
+        self.assertIn("steps.dispatch.outcome", self.text)
+        self.assertIn("::error::The update-library dispatch", self.text)
+        self.assertIn("GITHUB_STEP_SUMMARY", self.text)
+        # The failing step has to come after the dispatch it reports on.
+        self.assertLess(
+            self.text.index("Dispatch Library Update Event"),
+            self.text.index("Report Dispatch Result"),
+        )
+
+    def test_the_dispatch_result_is_reported_for_every_matrix_entry(self):
+        # The report step has no `if:` guard, so a failed dispatch is reported
+        # rather than skipped.
+        report = self.text.split("- name: Report Dispatch Result", 1)[1]
+        self.assertNotIn("if:", report)
+
+    def test_the_failure_message_names_the_board_that_was_not_notified(self):
+        report = self.text.split("- name: Report Dispatch Result", 1)[1]
+        self.assertIn("REPO: purduerov/${{ matrix.repo }}", report)
+        self.assertIn("$REPO", report)
+
     def test_notification_uses_no_workflow_token_permissions(self):
         # A GITHUB_TOKEN cannot dispatch into another repository, so the job is
         # given no token permissions and relies on the org or personal token.
@@ -113,6 +147,61 @@ class TestLibraryCiContract(unittest.TestCase):
         if yaml is None:
             self.skipTest("PyYAML is not installed in this environment")
         yaml.safe_load(self.text)
+
+
+class TestWorkflowShellBlocksParse(unittest.TestCase):
+    """Every `run:` block must be valid shell.
+
+    The step that reports a failed dispatch is shell, and a syntax error there
+    would turn a real dispatch failure back into a silent green run.
+    """
+
+    def bash(self) -> str | None:
+        path = shutil.which("bash")
+        if path is None:
+            return None
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            probe = Path(tmp) / "probe.sh"
+            probe.write_text("if true; then :; fi\n", encoding="utf-8", newline="\n")
+            posix = subprocess.run(
+                [path, "-c", "pwd -P"], cwd=tmp, capture_output=True, text=True, timeout=30
+            ).stdout.strip()
+            result = subprocess.run(
+                [path, "-n", f"{posix}/probe.sh"], capture_output=True, text=True, timeout=60
+            )
+            return path if result.returncode == 0 else None
+
+    def test_every_run_block_parses(self):
+        bash = self.bash()
+        if bash is None:
+            self.skipTest("no bash is available to parse the workflow scripts")
+        if yaml is None:
+            self.skipTest("PyYAML is not installed in this environment")
+        for workflow in sorted((ROOT / ".github/workflows").glob("*.yml")):
+            data = yaml.safe_load(workflow.read_text(encoding="utf-8"))
+            for job in (data.get("jobs") or {}).values():
+                for step in job.get("steps") or []:
+                    script = step.get("run")
+                    if not script or "${" in script:
+                        continue
+                    with self.subTest(workflow=workflow.name, step=step.get("name")):
+                        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+                            path = Path(tmp) / "step.sh"
+                            path.write_text(script, encoding="utf-8", newline="\n")
+                            posix = subprocess.run(
+                                [bash, "-c", "pwd -P"],
+                                cwd=tmp,
+                                capture_output=True,
+                                text=True,
+                                timeout=30,
+                            ).stdout.strip()
+                            result = subprocess.run(
+                                [bash, "-n", f"{posix}/step.sh"],
+                                capture_output=True,
+                                text=True,
+                                timeout=60,
+                            )
+                        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == "__main__":

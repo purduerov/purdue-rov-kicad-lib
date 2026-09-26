@@ -50,9 +50,26 @@ jobs:
           echo "::warning::Neither ORG_DISPATCH_TOKEN nor PAT_TOKEN is configured. The GITHUB_TOKEN fallback cannot dispatch to another repository, so the board repositories will not be notified."
 
       - name: Dispatch Library Update Event
+        id: dispatch
         uses: peter-evans/repository-dispatch@v3
+        # One unreachable board must not hide the state of the other seven, so
+        # the fan-out continues. The step below turns a real dispatch failure
+        # into a failed job, so a green run still means every board was notified.
         continue-on-error: true
         with:
           token: ${{ secrets.ORG_DISPATCH_TOKEN || secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
           repository: purduerov/${{ matrix.repo }}
           event-type: update-library
+
+      - name: Report Dispatch Result
+        env:
+          REPO: purduerov/${{ matrix.repo }}
+        run: |
+          set -uo pipefail
+          if [ "${{ steps.dispatch.outcome }}" = "failure" ]; then
+            echo "::error::The update-library dispatch to $REPO failed. That board was not notified, so its scheduled library update did not run."
+            echo "- $REPO: dispatch **failed**" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "Dispatch to $REPO accepted."
+          echo "- $REPO: dispatch accepted" >> "$GITHUB_STEP_SUMMARY"
