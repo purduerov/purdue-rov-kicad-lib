@@ -14,7 +14,9 @@ if sys.platform == "win32":
 # Mandatory fields that must be present in every component symbol
 MANDATORY_FIELDS = {"MPN", "Manufacturer", "Datasheet", "Temp_Range", "DigiKey", "Category"}
 
-ALLOWED_CATEGORIES = {"Passives", "Power", "Logic", "Connectors", "Sensors", "Mech"}
+from kicad_sym_utils import CATEGORIES as _CATEGORIES
+
+ALLOWED_CATEGORIES = set(_CATEGORIES)
 
 SYM_PATTERN = re.compile(r'\(symbol "([^"]+)"')
 SUB_SYM_PATTERN = re.compile(r'_[0-9]+_[0-9]+$')
