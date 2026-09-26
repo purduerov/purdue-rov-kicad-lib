@@ -1,13 +1,19 @@
 name: Notify Board Repositories
 
 on:
-  push:
-    branches:
-      - master
+  # Boards are notified only after the approved library revision has passed the
+  # full cross-platform library CI run, so a failed validation never fans out
+  # update requests. workflow_dispatch stays available for a manual retry.
+  workflow_run:
+    workflows: ["Cross-Platform Library CI Matrix"]
+    types: [completed]
+    branches: [master]
   workflow_dispatch:
 
 jobs:
   dispatch-update:
+    # A manual dispatch always runs; an automatic run needs a green library CI.
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
