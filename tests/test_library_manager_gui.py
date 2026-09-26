@@ -150,31 +150,27 @@ class TestLibraryManagerGui(unittest.TestCase):
         self.app.open_datasheet()
         mock_warning.assert_called_once()
 
-    @patch("library_manager_gui.subprocess.run")
-    @patch("library_manager_gui.messagebox.showinfo")
-    def test_run_linter_success(self, mock_info, mock_run):
-        """Verifies run_linter executes linter_validator.py and notifies user."""
-        mock_proc = MagicMock()
-        mock_proc.returncode = 0
-        mock_run.return_value = mock_proc
-
+    @patch("library_manager_gui._run_rov_action")
+    def test_run_linter_success(self, mock_run):
+        """Verifies run_linter delegates to the shared CLI."""
         self.app.run_linter()
-        self.assertTrue(mock_run.called)
-        mock_info.assert_called_once()
+        mock_run.assert_called_once_with(
+            "Linter Validation Failed",
+            ["library", "validate"],
+            root=self.app.root,
+            success_title="Linter Validation",
+        )
 
-    @patch("library_manager_gui.subprocess.run")
-    @patch("library_manager_gui.messagebox.showwarning")
-    def test_run_linter_failure(self, mock_warn, mock_run):
-        """Verifies run_linter displays warning when linter finds issues."""
-        mock_proc = MagicMock()
-        mock_proc.returncode = 1
-        mock_proc.stdout = "Rule violation"
-        mock_proc.stderr = ""
-        mock_run.return_value = mock_proc
-
+    @patch("library_manager_gui._run_rov_action")
+    def test_run_linter_failure(self, mock_run):
+        """Verifies run_linter reports through the shared action path."""
         self.app.run_linter()
-        self.assertTrue(mock_run.called)
-        mock_warn.assert_called_once()
+        mock_run.assert_called_once_with(
+            "Linter Validation Failed",
+            ["library", "validate"],
+            root=self.app.root,
+            success_title="Linter Validation",
+        )
 
     @patch("library_manager_gui.LibraryParser.save_symbol")
     @patch("library_manager_gui.messagebox.askyesno", return_value=True)

@@ -1341,27 +1341,12 @@ class LibraryManagerApp:
         ImportPartDialog(self.root, callback_on_imported=self.refresh_symbols)
 
     def run_linter(self):
-        linter_script = BASE_DIR / "scripts" / "linter_validator.py"
-        if not linter_script.exists():
-            messagebox.showerror("Error", "Linter script not found!")
-            return
-        
-        sym_files = list(SYMBOLS_DIR.glob("*.kicad_sym"))
-        sub_env = os.environ.copy()
-        sub_env["PYTHONIOENCODING"] = "utf-8"
-        sub_env["PYTHONUTF8"] = "1"
-        res = subprocess.run(
-            [sys.executable, str(linter_script)] + [str(p) for p in sym_files],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env=sub_env
+        return _run_rov_action(
+            "Linter Validation Failed",
+            ["library", "validate"],
+            root=self.root,
+            success_title="Linter Validation",
         )
-        if res.returncode == 0:
-            messagebox.showinfo("Linter Validation", "All components across all 6 libraries are 100% compliant with structural guidelines!")
-        else:
-            messagebox.showwarning("Linter Violations Found", res.stderr or res.stdout)
 
     def open_e2e_test_dialog(self):
         E2ETestDialog(self.root)
