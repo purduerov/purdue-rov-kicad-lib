@@ -237,6 +237,25 @@ class TestLibraryCiContract(unittest.TestCase):
                     f"{kept} drives fakes and must not skip on a display-less runner",
                 )
 
+    def test_docs_name_every_resolver_candidate(self):
+        contributing = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
+        for candidate in (
+            "ROV_DEVOPS_DIR",
+            ".pcb-devops-cache",
+            "../DevOps",
+            "../pcb-devops",
+            "board root",
+        ):
+            with self.subTest(candidate=candidate):
+                self.assertIn(candidate, contributing)
+
+    def test_docs_use_the_real_footprint_and_model_formats(self):
+        contributing = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
+        self.assertIn("rov_<category>:", contributing)
+        self.assertIn("${KIPRJMOD}/libs/purdue-rov-kicad-lib/3D_Models/", contributing)
+        self.assertNotIn("ROV_Footprints:[", contributing)
+        self.assertNotIn("${KICAD_PROJECT_DIR}/libs/", contributing)
+
 
 class TestWorkflowShellBlocksParse(unittest.TestCase):
     """Every `run:` block must be valid shell.

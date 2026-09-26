@@ -32,12 +32,11 @@ really contains `scripts/rov.py`:
 1. the `ROV_DEVOPS_DIR` environment variable, which always wins;
 2. `.pcb-devops-cache/` inside the library directory;
 3. a sibling `../DevOps`, the multi-repository workspace layout;
-4. a sibling `../pcb-devops`, the older single-repository sibling name.
+4. a sibling `../pcb-devops`, the older single-repository sibling name;
+5. the board root cache, two levels above the library, which is where a
+   board's `LAUNCH_KICAD` puts its cache.
 
-`ROV_DEVOPS_DIR` is the only setting that works in every layout. One known gap:
-when this library is a board submodule, the board's `LAUNCH_KICAD` puts its
-cache in the **board root**, one level above `libs/`, while candidate 2 looks
-inside the library directory. In that layout the GUI needs `ROV_DEVOPS_DIR` set.
+`ROV_DEVOPS_DIR` is the only setting that works in every layout.
 
 ### How the commands below are written
 
@@ -179,7 +178,7 @@ Follow these instructions exactly to create a new symbol, footprint, and 3D mode
 2. Save the STEP file inside the `libs/purdue-rov-kicad-lib/3D_Models/` directory.
 3. In the Footprint properties (under the **3D Models** tab), reference the model using the relative path:
    ```
-   ${KICAD_PROJECT_DIR}/libs/purdue-rov-kicad-lib/3D_Models/[your-part-name].step
+   ${KIPRJMOD}/libs/purdue-rov-kicad-lib/3D_Models/[your-part-name].step
    ```
 
 ### Step 4: Create the Symbol and Fields
@@ -188,7 +187,7 @@ Follow these instructions exactly to create a new symbol, footprint, and 3D mode
 3. Create your symbol. 
 4. In the symbol properties, set the **Footprint** field to:
    ```
-   ROV_Footprints:[exact_footprint_name_you_saved]
+   rov_<category>:[exact_footprint_name_you_saved]
    ```
 5. Add the **6 mandatory fields** as custom fields:
    *   `Category`: Must be one of `Passives`, `Power`, `Logic`, `Connectors`, `Sensors`, `Mech`. Click the `+` button in Symbol Properties to add a new custom field.
@@ -295,7 +294,7 @@ If you downloaded a symbol from Ultra Librarian, SnapEDA, or SamacSys, it will c
     *   Right-click the chosen library and click **Paste Symbol**.
 4.  **Enrich Properties**:
     *   Double-click the pasted symbol to open its properties.
-    *   Populate the **6 mandatory fields** (`Category`, `MPN`, `Manufacturer`, `DigiKey`, `Datasheet`, `Temp_Range`) and make sure the **Footprint** field points to `ROV_Footprints:[footprint_name]`. Click the `+` button to add any missing fields.
+    *   Populate the **6 mandatory fields** (`Category`, `MPN`, `Manufacturer`, `DigiKey`, `Datasheet`, `Temp_Range`) and make sure the **Footprint** field points to `rov_<category>:[footprint_name]`. Click the `+` button to add any missing fields.
     *   Click **Save**.
 5.  **Remove the Temporary Library**:
     *   Go back to **Preferences ➔ Manage Symbol Libraries** and remove the `temp_download` entry so your catalog stays clean.
