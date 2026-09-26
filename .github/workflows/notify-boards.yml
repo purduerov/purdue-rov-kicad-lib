@@ -10,11 +10,11 @@ on:
     branches: [master]
   workflow_dispatch:
 
-# The dispatch uses this repository's built-in GITHUB_TOKEN, so no token secret
-# has to be created or rotated to keep the boards notified. That was verified
-# rather than assumed: a run with no extra secret configured reached all eight
-# board repositories. If a future organisation policy blocks that, a token can
-# be added back to the dispatch step alone.
+# The dispatch needs a token that can reach the other board repositories: the
+# built-in GITHUB_TOKEN is refused with "Resource not accessible by
+# integration", so it is only the fallback. ORG_DISPATCH_TOKEN is already
+# configured in this repository, so nothing has to be set up, and a personal
+# PAT_TOKEN covers the case where that secret is ever removed.
 permissions: {}
 
 jobs:
@@ -48,7 +48,7 @@ jobs:
         # into a failed job, so a green run still means every board was notified.
         continue-on-error: true
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.ORG_DISPATCH_TOKEN || secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
           repository: purduerov/${{ matrix.repo }}
           event-type: update-library
 

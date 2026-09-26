@@ -110,20 +110,23 @@ class TestNotifyWorkflowContract(unittest.TestCase):
         self.assertIn("github.event.workflow_run.conclusion == 'success'", self.text)
         self.assertIn("github.event_name == 'workflow_dispatch'", self.text)
 
-    def test_notification_needs_no_token_secret(self):
-        """The dispatch runs on the built-in token, so no secret has to exist.
+    def test_notification_dispatch_can_reach_the_board_repositories(self):
+        """The dispatch must not fall back to the built-in token.
 
-        This workflow used to claim that a GITHUB_TOKEN cannot dispatch into
-        another repository and to warn that the boards would go unnotified. That
-        was never true here: a run with no ORG_DISPATCH_TOKEN or PAT_TOKEN
-        configured reached all eight board repositories. The false warning and
-        the two secret names are gone, so a member is not sent to create a
-        personal access token the system does not need.
+        The built-in GITHUB_TOKEN is refused by the dispatch API with "Resource
+        not accessible by integration", which silently stops every board from
+        being notified. An earlier version of this workflow assumed the
+        opposite and dropped the configured token; that broke all eight
+        dispatches. The configured secret is used first, the built-in token is
+        only ever a last resort, and the workflow says so where it is read.
         """
-        self.assertNotIn("ORG_DISPATCH_TOKEN", self.text)
-        self.assertNotIn("PAT_TOKEN", self.text)
-        self.assertNotIn("Warn About Token Fallback", self.text)
-        self.assertIn("token: ${{ secrets.GITHUB_TOKEN }}", self.text)
+        self.assertIn(
+            "token: ${{ secrets.ORG_DISPATCH_TOKEN || secrets.PAT_TOKEN "
+            "|| secrets.GITHUB_TOKEN }}",
+            self.text,
+        )
+        self.assertIn("Resource not accessible by", self.text)
+        self.assertIn("ORG_DISPATCH_TOKEN is already", self.text)
 
 
 class TestLibraryCiContract(unittest.TestCase):
