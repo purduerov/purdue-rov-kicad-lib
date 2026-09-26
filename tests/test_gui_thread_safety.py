@@ -4,6 +4,7 @@ Test suite verifying thread safety and graceful window teardown across
 all asynchronous Tkinter dialogs in library_manager_gui.py.
 """
 
+import os
 import sys
 import time
 import unittest
@@ -16,6 +17,15 @@ sys.path.insert(0, str(BASE_DIR / "scripts"))
 from unittest.mock import patch
 from library_manager_gui import E2ETestDialog, ImportPartDialog
 
+# Every test in this class opens a real Tk root. A runner with no usable display
+# does not fail fast on Tk: the root creation blocks, which is why the macOS
+# library CI legs ran for hours instead of reporting a problem. The workflow sets
+# ROV_SKIP_GUI_TESTS=1 where there is no display, and the decision is made here,
+# before any Tk call, so skipping can never itself hang.
+SKIP_GUI_TESTS = os.environ.get("ROV_SKIP_GUI_TESTS") == "1"
+
+
+@unittest.skipIf(SKIP_GUI_TESTS, "GUI tests skipped: no usable display on this runner")
 class TestGuiThreadSafety(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

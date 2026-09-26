@@ -148,6 +148,82 @@ class TestLibraryCiContract(unittest.TestCase):
             self.skipTest("PyYAML is not installed in this environment")
         yaml.safe_load(self.text)
 
+    def jobs(self) -> dict:
+        if yaml is None:
+            self.skipTest("PyYAML is not installed in this environment")
+        return (yaml.safe_load(self.text).get("jobs") or {})
+
+    def test_a_lint_symbols_job_exists(self):
+        """Branch protection requires a check named ``lint-symbols``.
+
+        The repository requires that check on ``master``, so no workflow may
+        report it and every pull request is unsatisfiable unless an admin
+        bypasses the rule. A dedicated job with exactly that name is what makes
+        the requirement real.
+        """
+        names = [job.get("name") for job in self.jobs().values()]
+        self.assertIn("lint-symbols", names)
+        self.assertEqual(1, names.count("lint-symbols"))
+
+    def test_the_symbol_linter_runs_once_not_in_every_matrix_leg(self):
+        """The linter and the compiler check belong to the one gate job.
+
+        They used to be steps in all twelve matrix legs, which ran the gate
+        twelve times for one answer.
+        """
+        linter = "scripts/linter_validator.py Symbols"
+        self.assertEqual(1, self.text.count(linter), "the linter must run exactly once")
+        compiler = "git diff --exit-code Symbols/*.kicad_sym"
+        self.assertEqual(1, self.text.count(compiler), "the compiler check must run exactly once")
+        for name, job in self.jobs().items():
+            if name == "lint-symbols":
+                continue
+            steps = yaml.safe_dump(job) if yaml is not None else ""
+            self.assertNotIn("linter_validator.py", steps, f"{name} must not re-run the linter")
+
+    def test_every_job_is_bounded_by_a_timeout(self):
+        """A hung leg must fail in minutes, not run for hours.
+
+        The macOS legs ran for six hours before being cancelled, which hid the
+        real problem. Every job carries an explicit timeout.
+        """
+        for name, job in self.jobs().items():
+            with self.subTest(job=name):
+                self.assertIn("timeout-minutes", job, f"{name} needs a timeout-minutes")
+
+    def test_the_macos_leg_tells_the_gui_tests_to_skip(self):
+        """Tk blocks on the macOS runner, so the leg must not try to open a root.
+
+        The skip is decided inside the test modules before any Tk call, so it
+        cannot hang, and the leg still runs every non-GUI test.
+        """
+        self.assertIn("ROV_SKIP_GUI_TESTS", self.text)
+        for module in ("test_gui_thread_safety.py", "test_library_manager_gui.py"):
+            with self.subTest(module=module):
+                text = (ROOT / "tests" / module).read_text(encoding="utf-8")
+                self.assertIn('os.environ.get("ROV_SKIP_GUI_TESTS")', text)
+                self.assertIn("@unittest.skipIf(SKIP_GUI_TESTS", text)
+
+    def test_the_skip_flag_does_not_disable_the_headless_gui_tests(self):
+        """Only the classes that open a real Tk root may skip.
+
+        The threading and import-dialog classes drive fakes, so they must stay
+        headless and keep running everywhere.
+        """
+        lines = [
+            line.strip()
+            for line in (ROOT / "tests" / "test_library_manager_gui.py")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        ]
+        for kept in ("class TestRovActionThreading", "class TestImportDialogPullRequestRoot"):
+            with self.subTest(klass=kept):
+                index = next(i for i, line in enumerate(lines) if line.startswith(kept))
+                self.assertFalse(
+                    lines[index - 1].startswith("@unittest.skipIf"),
+                    f"{kept} drives fakes and must not skip on a display-less runner",
+                )
+
 
 class TestWorkflowShellBlocksParse(unittest.TestCase):
     """Every `run:` block must be valid shell.

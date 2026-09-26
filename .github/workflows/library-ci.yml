@@ -10,6 +10,10 @@ jobs:
   test-matrix:
     name: Test (${{ matrix.os }}, Py ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
+    # A hung leg must fail in minutes. Without this the macOS legs ran for six
+    # hours before anyone cancelled them, which hid the real problem and burned
+    # runner time. The suite takes well under a minute where it can run.
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -45,8 +49,33 @@ jobs:
 
       - name: Run Unit and GUI Tests (Windows/macOS)
         if: runner.os != 'Linux'
+        env:
+          # Tk needs a usable display. Linux gets xvfb above and Windows has a
+          # desktop session, but the macOS runner has no WindowServer session
+          # for Tk, where root creation blocks instead of failing. The GUI
+          # classes skip themselves before touching Tk, so this leg still runs
+          # every non-GUI test. GUI coverage comes from the Linux and Windows
+          # legs.
+          ROV_SKIP_GUI_TESTS: ${{ runner.os == 'macOS' && '1' || '0' }}
         run: |
           python -m unittest discover -s tests -v
+
+  lint-symbols:
+    # The library's metadata gate, and the check this branch protection requires.
+    # It used to run as a step inside all twelve matrix legs, which both wasted
+    # twelve runs and left the required check name unsatisfiable. One dedicated
+    # job makes the required check real and runs the gate once.
+    name: lint-symbols
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Library
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
 
       - name: Run Symbol Library Linter
         run: |
@@ -60,6 +89,7 @@ jobs:
   codepage-resilience:
     name: Codepage Resilience (Windows, Py 3.13, ASCII/cp1252)
     runs-on: windows-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout Library
         uses: actions/checkout@v4

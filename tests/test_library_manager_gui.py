@@ -4,6 +4,7 @@ Comprehensive Headless Button and Flow Integration Test Suite for LibraryManager
 Verifies all buttons, callbacks, filters, and dialog flows headlessly.
 """
 
+import os
 import shutil
 import subprocess
 import sys
@@ -21,6 +22,14 @@ sys.path.insert(0, str(BASE_DIR / "scripts"))
 import library_manager_gui
 from library_manager_gui import LibraryManagerApp, ImportPartDialog, E2ETestDialog
 
+# TestLibraryManagerGui opens a real Tk root. A runner with no usable display
+# does not fail fast on Tk: the root creation blocks, which is why the macOS
+# library CI legs ran for hours instead of reporting a problem. The workflow sets
+# ROV_SKIP_GUI_TESTS=1 where there is no display, and the decision is made here,
+# before any Tk call, so skipping can never itself hang. The other classes in
+# this module drive fakes and stay headless on every platform.
+SKIP_GUI_TESTS = os.environ.get("ROV_SKIP_GUI_TESTS") == "1"
+
 
 def _dialog_text(mock_dialog):
     """Return every text fragment passed to a patched message box."""
@@ -31,6 +40,7 @@ def _dialog_text(mock_dialog):
     )
 
 
+@unittest.skipIf(SKIP_GUI_TESTS, "GUI tests skipped: no usable display on this runner")
 class TestLibraryManagerGui(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
