@@ -243,7 +243,29 @@ class TestImportPartContributionHint(unittest.TestCase):
 
         output = buffer.getvalue()
         self.assertIn("[FAIL] Linter check failed", output)
+        self.assertIn("missing mandatory field: MPN", output)
         self.assertNotIn("Library changes validated. Run:", output)
+
+    def test_non_interactive_import_missing_cli_prints_message_and_exits_nonzero(self):
+        """A missing DevOps checkout is an actionable message, not a traceback."""
+        source_file = self._write_source_symbol()
+
+        def fake_run(*_args, **_kwargs):
+            raise FileNotFoundError("checked ...")
+
+        argv = self._import_argv(source_file)
+        buffer = io.StringIO()
+        with patch.object(sys, "argv", argv), patch.object(
+            import_part.rov_bridge, "run_rov", fake_run
+        ):
+            with redirect_stdout(buffer):
+                with self.assertRaises(SystemExit) as ctx:
+                    import_part.main()
+
+        self.assertEqual(1, ctx.exception.code)
+        output = buffer.getvalue()
+        self.assertIn("checked", output)
+        self.assertNotIn("Traceback", output)
 
     def _import_argv(self, source_file):
         """Return the argument list the importer is driven with."""
@@ -347,6 +369,51 @@ class TestSharedValidation(unittest.TestCase):
             code, output = import_part.run_shared_validation()
         self.assertEqual(1, code)
         self.assertIn("Rule violation", output)
+
+    def test_interactive_import_prints_failing_validation_output(self):
+        """The wizard shows the violations, not just the FAIL line."""
+        answers = iter([
+            "",  # symbol path: standard passive, no file read
+            "",  # footprint path
+            "",  # 3D model path
+            "",  # category: detected default
+            "",  # passive symbol type: resistor
+            "TEST-IM-0001",  # MPN
+            "Test Vendor",  # manufacturer
+            "https://example.invalid/datasheet.pdf",  # datasheet
+            "000-00000-ND",  # DigiKey
+            "",  # temp range: default
+        ])
+
+        def fake_validate(*_args, **_kwargs):
+            return subprocess.CompletedProcess([], 1, "", "missing mandatory field: MPN")
+
+        buffer = io.StringIO()
+        with patch("builtins.input", lambda _prompt="": next(answers)), patch.object(
+            import_part.rov_bridge, "run_rov", fake_validate
+        ), patch.object(
+            import_part, "append_symbol_to_category", lambda *a, **k: None
+        ):
+            with redirect_stdout(buffer):
+                import_part.interactive_mode()
+
+        output = buffer.getvalue()
+        self.assertIn("[FAIL] Linter check failed", output)
+        self.assertIn("missing mandatory field: MPN", output)
+
+    def test_missing_cli_prints_message_and_exits_nonzero(self):
+        """No DevOps checkout means an actionable message, never a traceback."""
+        def fake_run(*_args, **_kwargs):
+            raise FileNotFoundError("checked ...")
+
+        buffer = io.StringIO()
+        with patch.object(import_part.rov_bridge, "run_rov", fake_run):
+            with redirect_stdout(buffer):
+                with self.assertRaises(SystemExit) as ctx:
+                    import_part.run_shared_validation()
+
+        self.assertEqual(1, ctx.exception.code)
+        self.assertIn("checked", buffer.getvalue())
 
 
 if __name__ == "__main__":

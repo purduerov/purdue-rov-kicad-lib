@@ -56,8 +56,17 @@ FOOTPRINTS_DIR = BASE_DIR / "Footprints"
 MANDATORY_FIELDS = ["MPN", "Manufacturer", "Datasheet", "Temp_Range", "DigiKey", "Category"]
 
 def run_shared_validation():
-    """Validate the library through the shared CLI and return code and output."""
-    result = rov_bridge.run_rov(BASE_DIR, ["library", "validate"])
+    """Validate the library through the shared CLI and return code and output.
+
+    A missing DevOps checkout is an actionable message, not a traceback: the
+    resolver error already names every checked path and the fix, so it is
+    printed and the process exits non-zero.
+    """
+    try:
+        result = rov_bridge.run_rov(BASE_DIR, ["library", "validate"])
+    except OSError as exc:
+        print(exc)
+        sys.exit(1)
     output = (result.stdout or "") + (result.stderr or "")
     return result.returncode, output
 
@@ -248,13 +257,15 @@ def interactive_mode():
     append_symbol_to_category(category, updated_sym)
     
     print("\n[INFO] Running Linter Verification...")
-    returncode, _ = run_shared_validation()
+    returncode, validation_output = run_shared_validation()
 
     if returncode == 0:
         print("\n[OK] Part imported successfully and verified compliant!")
         print_contribution_hint(mpn, category)
     else:
         print("\n[FAIL] Linter check failed. Please correct fields.")
+        if validation_output:
+            print(validation_output)
 
 def main():
     parser = argparse.ArgumentParser(description="Import parts into Purdue ROV KiCad Library")
@@ -310,12 +321,14 @@ def main():
     append_symbol_to_category(category, updated_sym)
     
     # Run linter
-    returncode, _ = run_shared_validation()
+    returncode, validation_output = run_shared_validation()
     if returncode == 0:
         print("[OK] Part imported successfully and verified compliant!")
         print_contribution_hint(field_updates["MPN"], category)
     else:
         print("[FAIL] Linter check failed. Please correct fields.")
+        if validation_output:
+            print(validation_output)
 
 if __name__ == "__main__":
     main()
