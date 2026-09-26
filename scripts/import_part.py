@@ -21,6 +21,7 @@ Usage (CLI Arguments):
 import sys
 import os
 import re
+import shlex
 import shutil
 import argparse
 from pathlib import Path
@@ -54,6 +55,21 @@ SYMBOLS_DIR = BASE_DIR / "Symbols"
 FOOTPRINTS_DIR = BASE_DIR / "Footprints"
 MANDATORY_FIELDS = ["MPN", "Manufacturer", "Datasheet", "Temp_Range", "DigiKey", "Category"]
 
+def shell_join(command):
+    """Render an argument list as one copy-pasteable command line.
+
+    An MPN or a category read out of a downloaded symbol can contain a space, a
+    quote, or a shell metacharacter, and the hint is meant to be pasted into a
+    terminal. The quoting has to match the platform: ``cmd.exe``/PowerShell and
+    a POSIX shell do not use the same rules, and ``shlex.quote`` output pasted
+    into a Windows terminal would pass the single quotes through to the program
+    as part of the path.
+    """
+    if os.name == "nt":
+        return subprocess.list2cmdline(command)
+    return shlex.join(command)
+
+
 def print_contribution_hint(mpn, category):
     """Print the safe next command for publishing a validated part.
 
@@ -71,10 +87,15 @@ def print_contribution_hint(mpn, category):
             "rov library contribute --push --pr"
         )
         return
-    print(
-        f"Library changes validated. Run: {sys.executable} {devops_script} "
-        f"library contribute --name {part} --category {category} --push --pr"
-    )
+    command = [
+        sys.executable,
+        str(devops_script),
+        "library", "contribute",
+        "--name", part,
+        "--category", str(category).strip(),
+        "--push", "--pr",
+    ]
+    print(f"Library changes validated. Run: {shell_join(command)}")
 
 def parse_existing_properties(sym_str):
     props, _ = parse_symbol_properties(sym_str)

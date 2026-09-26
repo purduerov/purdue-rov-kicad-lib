@@ -200,7 +200,7 @@ reviewable pull request and never touches the library checkout.
 | :--- | :--- |
 | `library validate` | Runs the symbol metadata linter. A non-zero linter exit is a `FAIL`. |
 | `library build` | Rebuilds the generated category symbol libraries. |
-| `library list` / `library search` | Prints `name`, `category`, `MPN`, `manufacturer` as tab-separated rows. |
+| `library list` / `library search` | Prints `name`, `category`, `MPN`, `manufacturer` as tab-separated rows on standard output. The `[PASS]`/`[BLOCKED]` summary goes to standard error, so the rows can be piped straight into another tool. |
 | `library sync` | Requires a clean worktree, then fetches and fast-forwards. It never pushes. Always confirm which directory it resolved before letting it run. |
 | `library import` | Runs `scripts/import_part.py`. |
 | `library contribute` | Validates, creates an `add-part-*` branch, stages only the four library directories, commits, and with `--push --pr` publishes the branch and opens a pull request. |

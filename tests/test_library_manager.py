@@ -5,6 +5,7 @@ Unit and Integration tests for Library Manager parser, editor, and operations.
 
 import io
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -161,6 +162,42 @@ class TestImportPartContributionHint(unittest.TestCase):
         self.assertIn("Set ROV_DEVOPS_DIR or run LAUNCH_KICAD once", output)
         self.assertIn("rov library contribute --push --pr", output)
 
+    def test_hint_shell_quotes_a_part_name_with_metacharacters(self):
+        """A part number is data, never a command.
+
+        The MPN is read out of a downloaded symbol file, so it can contain a
+        space or a shell metacharacter. The hint is meant to be copied and
+        pasted, and an unquoted value would be reinterpreted by the shell the
+        member pastes it into.
+        """
+        for mpn in ("TPS 62130", "A&B", "part;rm -rf /", "quote'part"):
+            with self.subTest(mpn=mpn):
+                output = self._hint_for(mpn, devops="C:/devops/DevOps")
+                self.assertEqual(
+                    self._parse_hint(output),
+                    self._expected_command(mpn, devops="C:/devops/DevOps"),
+                    f"the printed command must round-trip through a shell: {output!r}",
+                )
+
+    def test_hint_quotes_a_devops_path_containing_a_space(self):
+        output = self._hint_for("ZZTEST", devops="C:/Program Files/DevOps")
+        self.assertEqual(
+            self._parse_hint(output),
+            self._expected_command("ZZTEST", devops="C:/Program Files/DevOps"),
+        )
+
+    def test_shell_join_uses_the_platform_quoting_rules(self):
+        # POSIX quoting pasted into a Windows terminal would reach the program
+        # with the single quotes still attached, so each platform gets its own.
+        command = ["python", "C:/Program Files/rov.py", "--name", "A B"]
+        if os.name == "nt":
+            self.assertEqual(
+                import_part.shell_join(command),
+                subprocess.list2cmdline(command),
+            )
+        else:
+            self.assertEqual(shlex.split(import_part.shell_join(command)), command)
+
     def test_non_interactive_import_prints_the_same_hint_after_validation(self):
         """The argument-driven path gives the same next step as the wizard."""
         source_file = self._write_source_symbol()
@@ -249,6 +286,40 @@ class TestImportPartContributionHint(unittest.TestCase):
             with redirect_stdout(buffer):
                 import_part.print_contribution_hint(self.PART_NAME, "Power")
         return buffer.getvalue()
+
+    def _hint_for(self, mpn, devops):
+        """Return the hint for an arbitrary part name and DevOps location."""
+
+        def fake_resolve(_library_dir):
+            return Path(devops)
+
+        buffer = io.StringIO()
+        with patch.object(import_part.rov_bridge, "resolve_devops_dir", fake_resolve):
+            with redirect_stdout(buffer):
+                import_part.print_contribution_hint(mpn, "Power")
+        return buffer.getvalue()
+
+    def _parse_hint(self, output):
+        """Split the printed command back into the arguments it stands for."""
+        command = output.split("Run:", 1)[1].strip()
+        if os.name == "nt":
+            # The Windows parser lives in the C runtime; assert on the exact
+            # rendering `subprocess` itself would produce instead.
+            return command
+        return shlex.split(command)
+
+    def _expected_command(self, mpn, devops):
+        """The argument list the printed command has to stand for."""
+        script = str(Path(devops) / "scripts" / "rov.py")
+        command = [
+            sys.executable,
+            script,
+            "library", "contribute",
+            "--name", mpn,
+            "--category", "Power",
+            "--push", "--pr",
+        ]
+        return command if os.name != "nt" else import_part.shell_join(command)
 
 
 if __name__ == "__main__":

@@ -11,10 +11,17 @@ of those rules and never publishes to the protected library branch itself.
 The DevOps checkout is searched in this order:
 
 1. the ``ROV_DEVOPS_DIR`` environment variable, which always wins,
-2. ``<library_dir>/.pcb-devops-cache``, the copy a board's ``LAUNCH_KICAD`` run
-   caches next to the library,
+2. ``<library_dir>/.pcb-devops-cache``, a cache that sits inside the library
+   checkout itself,
 3. ``<library_dir>/../DevOps``, the multi-repository workspace layout,
-4. ``<library_dir>/../pcb-devops``, the older single-repository sibling name.
+4. ``<library_dir>/../pcb-devops``, the older single-repository sibling name,
+5. ``<library_dir>/../../.pcb-devops-cache``, the cache a board's ``LAUNCH_KICAD``
+   run creates at the board root. A board consumes this library as the
+   ``libs/purdue-rov-kicad-lib`` submodule, so the board root is two levels up.
+   It is listed last so it cannot displace any of the four locations above: in
+   the workspace layout ``<library_dir>/../DevOps`` is the live checkout, and a
+   cache copy of the platform must never win over it. In a board checkout the
+   two sibling candidates do not exist, so this is the one that resolves.
 
 A candidate only counts when it actually contains ``scripts/rov.py``, so a stale
 or unrelated directory is skipped instead of being reported as a usable CLI.
@@ -68,7 +75,22 @@ def devops_candidates(library_dir: Path) -> list[Path]:
     candidates.append(root / CACHE_DIR_NAME)
     candidates.append(root.parent / SIBLING_DIR_NAME)
     candidates.append(root.parent / LEGACY_DIR_NAME)
+    # Lowest priority on purpose: it is a cache copy, so a live sibling checkout
+    # above it must always win.
+    candidates.append(board_cache_dir(root))
     return candidates
+
+
+def board_cache_dir(library_dir: Path) -> Path:
+    """Return the platform cache at the root of the board that owns the library.
+
+    A board consumes this library as the ``<board>/libs/purdue-rov-kicad-lib``
+    submodule, and ``LAUNCH_KICAD`` caches the platform at
+    ``<board>/.pcb-devops-cache``, so the board root is two levels above the
+    library directory. Naming it in one place keeps the resolver and its
+    documentation from disagreeing.
+    """
+    return Path(library_dir).parent.parent / CACHE_DIR_NAME
 
 
 def resolve_devops_dir(library_dir: Path) -> Path:

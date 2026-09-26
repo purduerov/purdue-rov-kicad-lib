@@ -55,6 +55,94 @@ class TestRovBridge(unittest.TestCase):
             self.assertEqual(result.stdout.strip(), "library|validate")
 
 
+class TestDevOpsResolutionOrder(unittest.TestCase):
+    """The candidate order is the contract, so it is asserted as one list.
+
+    A board consumes the library as `<board>/libs/purdue-rov-kicad-lib` and
+    `LAUNCH_KICAD` caches the platform at `<board>/.pcb-devops-cache`, so the
+    board-root cache is two levels above the library. It was missing from the
+    resolver entirely, which left the Library Manager unable to find the CLI in a
+    board checkout. It is added last so a live sibling checkout still wins.
+    """
+
+    def make_cli(self, directory: Path) -> Path:
+        (directory / "scripts").mkdir(parents=True, exist_ok=True)
+        (directory / "scripts" / "rov.py").write_text("", encoding="utf-8")
+        return directory
+
+    def test_board_root_cache_is_the_last_candidate(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {}, clear=True):
+            library = Path(tmp) / "Libraries"
+            library.mkdir()
+            with_env = [
+                rov_bridge.devops_candidates(library),
+            ]
+            with patch.dict(os.environ, {"ROV_DEVOPS_DIR": str(Path(tmp) / "env")}):
+                with_env.append(rov_bridge.devops_candidates(library))
+        self.assertEqual(
+            with_env[0],
+            [
+                library / ".pcb-devops-cache",
+                library.parent / "DevOps",
+                library.parent / "pcb-devops",
+                rov_bridge.board_cache_dir(library),
+            ],
+            "without an explicit override the board-root cache is searched last",
+        )
+        self.assertEqual(
+            with_env[1][0],
+            Path(tmp) / "env",
+            "the explicit override still wins",
+        )
+
+    def test_the_board_root_cache_is_found_in_a_board_checkout(self):
+        """The reported gap: a board checkout has no sibling DevOps directory."""
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {}, clear=True):
+            board = Path(tmp) / "X19-Float-Board"
+            library = board / "libs" / "purdue-rov-kicad-lib"
+            library.mkdir(parents=True)
+            cache = self.make_cli(board / ".pcb-devops-cache")
+
+            self.assertEqual(rov_bridge.resolve_devops_dir(library), cache)
+
+    def test_a_live_sibling_still_wins_over_the_board_cache(self):
+        """A real checkout beats a cache copy, whatever the layout.
+
+        Both candidates are resolved relative to the library directory, so this
+        is the only arrangement in which the two can both exist. The order has
+        to put the sibling first, or a stale cache would displace the checkout a
+        developer is actually working in.
+        """
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {}, clear=True):
+            board = Path(tmp) / "board"
+            library = board / "libs" / "purdue-rov-kicad-lib"
+            library.mkdir(parents=True)
+            self.make_cli(board / ".pcb-devops-cache")
+            sibling = self.make_cli(library.parent / "DevOps")
+
+            self.assertEqual(rov_bridge.resolve_devops_dir(library), sibling)
+
+    def test_a_cache_inside_the_library_still_wins_over_the_board_cache(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {}, clear=True):
+            board = Path(tmp) / "board"
+            library = board / "libs" / "purdue-rov-kicad-lib"
+            library.mkdir(parents=True)
+            self.make_cli(board / ".pcb-devops-cache")
+            inside = self.make_cli(library / ".pcb-devops-cache")
+
+            self.assertEqual(rov_bridge.resolve_devops_dir(library), inside)
+
+    def test_an_unusable_candidate_is_skipped_rather_than_reported(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {}, clear=True):
+            board = Path(tmp) / "board"
+            library = board / "libs" / "purdue-rov-kicad-lib"
+            library.mkdir(parents=True)
+            (board / ".pcb-devops-cache").mkdir()  # present but has no scripts/rov.py
+            with self.assertRaises(FileNotFoundError) as caught:
+                rov_bridge.resolve_devops_dir(library)
+            self.assertIn(str(rov_bridge.board_cache_dir(library)), str(caught.exception))
+
+
 class TestRovBridgeTimeouts(unittest.TestCase):
     """The bridge must never wait on a hung CLI forever.
 
