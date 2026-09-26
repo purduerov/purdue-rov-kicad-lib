@@ -5,9 +5,144 @@ This document outlines the step-by-step process for creating, importing, and sub
 ---
 
 ## Table of Contents
-1. [Step-by-Step Guide to Adding a Component](#step-by-step-guide-to-adding-a-component)
-2. [How to Import Symbols Downloaded Online](#how-to-import-symbols-downloaded-online)
-3. [Footprint Design & Reflow Best Practices](#footprint-design--reflow-best-practices)
+1. [Before You Start: One Set of Rules](#before-you-start-one-set-of-rules)
+2. [Step-by-Step Guide to Adding a Component](#step-by-step-guide-to-adding-a-component)
+3. [How to Import Symbols Downloaded Online](#how-to-import-symbols-downloaded-online)
+4. [Footprint Design & Reflow Best Practices](#footprint-design--reflow-best-practices)
+
+---
+
+## Before You Start: One Set of Rules
+
+`master` is protected. **Nothing in this repository, and nothing in the Library
+Manager GUI, commits to or pushes `master`.** Every contribution lands on a
+reviewable branch and arrives as a pull request.
+
+The GUI and the command line are two front ends to the same implementation in
+`purduerov/pcb-devops`. They run the same linter, enforce the same staging rules,
+and refuse the same things, so a change that passes in one passes in the other.
+
+### Finding the shared CLI
+
+This repository has no `LAUNCH_KICAD` launcher; that belongs to board
+repositories. The GUI resolves the shared CLI through `scripts/rov_bridge.py`,
+which looks for a DevOps checkout in this order and takes the first one that
+really contains `scripts/rov.py`:
+
+1. the `ROV_DEVOPS_DIR` environment variable, which always wins;
+2. `.pcb-devops-cache/` inside the library directory;
+3. a sibling `../DevOps`, the multi-repository workspace layout;
+4. a sibling `../pcb-devops`, the older single-repository sibling name.
+
+`ROV_DEVOPS_DIR` is the only setting that works in every layout. One known gap:
+when this library is a board submodule, the board's `LAUNCH_KICAD` puts its
+cache in the **board root**, one level above `libs/`, while candidate 2 looks
+inside the library directory. In that layout the GUI needs `ROV_DEVOPS_DIR` set.
+
+### How the commands below are written
+
+`--library-dir` defaults to the current directory, so **where you run a command
+decides which library it acts on.** There is no `../DevOps` from a board
+repository: a board lives at `KiCad/Boards/<board>`, so `../DevOps` would mean
+`KiCad/Boards/DevOps`, which does not exist. Pick the form that matches where
+you are. Every example is spelled out in full, because a shell variable holding
+a multi-word command does not survive word splitting.
+
+- **From this repository's root, with a sibling `../DevOps` checkout.** This is
+  the standalone-clone layout, and the only place `../DevOps` is correct.
+
+  macOS or Linux:
+
+  ```bash
+  python ../DevOps/scripts/rov.py library validate
+  ```
+
+  Windows, in PowerShell or `cmd`:
+
+  ```text
+  py -3 ..\DevOps\scripts\rov.py library validate
+  ```
+
+- **From the library root inside a board submodule**, where the board's cache is
+  two levels up:
+
+  ```bash
+  python ../../.pcb-devops-cache/scripts/rov.py library validate
+  ```
+
+- **From a board repository root, after `LAUNCH_KICAD` has run once.** The
+  board's copy of the platform tools sits at the board root, the same path the
+  launcher and the generated `.rov-hooks/pre-commit` use. Name the library
+  explicitly, because from a board root the default would resolve to the board
+  itself:
+
+  ```bash
+  python .pcb-devops-cache/scripts/rov.py library validate --library-dir libs/purdue-rov-kicad-lib
+  ```
+
+  ```powershell
+  py -3 .pcb-devops-cache\scripts\rov.py library validate --library-dir libs\purdue-rov-kicad-lib
+  ```
+
+- **`ROV_DEVOPS_DIR` set.** This is the form that always works.
+
+  macOS or Linux:
+
+  ```bash
+  python "$ROV_DEVOPS_DIR/scripts/rov.py" library validate
+  ```
+
+  PowerShell:
+
+  ```powershell
+  py -3 "$env:ROV_DEVOPS_DIR\scripts\rov.py" library validate
+  ```
+
+Substitute the rest of the arguments exactly as written after `rov.py`, and
+choose the path that matches your layout. If you prefer a shorthand, define a
+shell **function** or an **array**, which both keep the arguments intact. These
+work in both bash and zsh:
+
+```bash
+# standalone clone, sibling DevOps
+rov() { python ../DevOps/scripts/rov.py "$@"; }
+
+# library root inside a board submodule
+rov() { python ../../.pcb-devops-cache/scripts/rov.py "$@"; }
+
+# ROV_DEVOPS_DIR set
+rov() { python "$ROV_DEVOPS_DIR/scripts/rov.py" "$@"; }
+```
+
+```powershell
+# PowerShell, sibling DevOps
+function Invoke-Rov { py -3 ..\DevOps\scripts\rov.py @args }
+
+# PowerShell, ROV_DEVOPS_DIR set
+function Invoke-Rov { py -3 "$env:ROV_DEVOPS_DIR\scripts\rov.py" @args }
+```
+
+An array works the same way where your shell supports it. For a standalone
+clone with a sibling `../DevOps`:
+
+```bash
+ROV=(python ../DevOps/scripts/rov.py "$@")
+"${ROV[@]}" library validate
+```
+
+Two known follow-ups are recorded rather than fixed, and both need owner
+approval before anyone changes them:
+
+- **Legacy tracked `.githooks/pre-commit` files may still reach the network.**
+  Older boards and the board template carry a tracked `.githooks/` hook that runs
+  `git fetch`/`git pull` against the library submodule and can stage a submodule
+  change during an ordinary `git commit`. New boards get the untracked
+  `.rov-hooks/` hook, which only validates. If a hook surprises you, use
+  `--no-verify` and check `git status` before committing.
+- **Board update wrappers rely on repository default permissions.** The reusable
+  `update-library.yml` declares least-privilege permissions, but the thin
+  `auto-update-submodule.yml` wrappers in each board do not, so they inherit the
+  repository default.
 
 ---
 
@@ -16,19 +151,22 @@ This document outlines the step-by-step process for creating, importing, and sub
 Follow these instructions exactly to create a new symbol, footprint, and 3D model from scratch:
 
 ### Step 1: Prep Your Local Workspace
-1. Navigate to the library submodule folder inside your board repository (or your standalone library clone):
+1. Navigate to the library root. Use your standalone library clone, or the library submodule inside your board repository:
    ```bash
    cd libs/purdue-rov-kicad-lib
    ```
-2. Make sure you are on `master` and fully up to date:
+   Every `rov library` command in Steps 1, 5, and 6 must be run from this directory, because `--library-dir` defaults to the current directory. There is no `../DevOps` here when the library is a board submodule; the paths above cover that case.
+2. Make sure you are on `master` and fully up to date. Use the safe sync, which requires a clean worktree, fetches, and fast-forwards. It never pushes and never resets your work. From the library root, use the form that matches your layout:
    ```bash
-   git checkout master
-   git pull origin master
+   # standalone clone, sibling DevOps
+   python ../DevOps/scripts/rov.py library sync
    ```
-3. Create a branch for your part:
    ```bash
-   git checkout -b feature/add-[part-name]
+   # library root inside a board submodule
+   python ../../.pcb-devops-cache/scripts/rov.py library sync
    ```
+   If the remote is unreachable, the command reports `BLOCKED` and keeps your cached revision rather than pretending you are current.
+3. Do not create a branch by hand. `library contribute` creates the `add-part-*` branch from `master` after validation, which is what keeps contributions from stacking on each other.
 
 ### Step 2: Create and Link the Footprint
 1. Open KiCad's **Footprint Editor**.
@@ -62,44 +200,79 @@ Follow these instructions exactly to create a new symbol, footprint, and 3D mode
 6. Save the symbol inside the chosen library.
 
 ### Step 5: Verify Locally
-1. Run the python linter script from the library root to ensure it passes all validations:
+1. Run the shared linter through the CLI. This is the same check CI runs. From the library root, use the form that matches your layout:
    ```bash
-   python scripts/linter_validator.py Symbols/*.kicad_sym
+   # standalone clone, sibling DevOps
+   python ../DevOps/scripts/rov.py library validate
+   ```
+   ```bash
+   # library root inside a board submodule
+   python ../../.pcb-devops-cache/scripts/rov.py library validate
    ```
 2. Verify that the output says `Validation successful!`. If there are lint errors, fix the fields in the Symbol Editor and save again.
+3. Optionally rebuild the generated category libraries so the new part is visible to every consuming table:
+   ```bash
+   # standalone clone, sibling DevOps
+   python ../DevOps/scripts/rov.py library build
+   ```
+   ```bash
+   # library root inside a board submodule
+   python ../../.pcb-devops-cache/scripts/rov.py library build
+   ```
 
-### Step 6: Commit and Push
-1. Check git status to ensure you aren't staging junk files (like `.DS_Store` or local `.kicad_prl` configs):
+### Step 6: Prepare the Branch and Pull Request
+1. Check `git status` first. `library contribute` refuses to run when anything outside `Symbols/`, `Footprints/`, `3D_Models/`, or `Design_Blocks/` is modified, so clear out stray files such as `.DS_Store` or local `.kicad_prl` state before you start:
    ```bash
    git status
    ```
-2. Stage only the new files and library modifications:
+2. Validate, create the branch, stage only the library directories, commit, and open the pull request in one command, from the library root:
    ```bash
-   git add Symbols/*.kicad_sym Footprints/*/*.kicad_mod 3D_Models/[your-model].step
+   # standalone clone, sibling DevOps
+   python ../DevOps/scripts/rov.py library contribute --name [MPN] --category [Category] --push --pr
    ```
-3. Commit and push your branch:
    ```bash
-   git commit -m "feat(library): add [part-name] symbol, footprint, and 3D model"
-   git push origin feature/add-[part-name]
+   # library root inside a board submodule
+   python ../../.pcb-devops-cache/scripts/rov.py library contribute --name [MPN] --category [Category] --push --pr
    ```
+   The branch is named `add-part-<part>-<timestamp>` and the commit message is `feat(parts): add [MPN] to [Category]`.
+3. To prepare the branch and commit locally without publishing anything, run the same command without `--push --pr`. Nothing reaches GitHub until both flags are passed.
+4. To review the change yourself before committing:
+   ```bash
+   # standalone clone, sibling DevOps
+   python ../DevOps/scripts/rov.py library validate
+   ```
+   ```bash
+   # library root inside a board submodule
+   python ../../.pcb-devops-cache/scripts/rov.py library validate
+   ```
+   ```bash
+   git status --short
+   git diff --stat
+   ```
+5. From the Library Manager GUI, the same action is **Create Pull Request**, which calls `library contribute --name MPN --category Category --push --pr` for you. **Git Sync** calls `library sync`. Neither one pushes `master`.
 
 ### Step 7: Pull Request & Submodule Update
-1. Go to [purdue-rov-kicad-lib on GitHub](https://github.com/purduerov/purdue-rov-kicad-lib) and open a Pull Request.
-2. Once the automated `lint-symbols` check passes, merge the PR into `master`.
-3. Go back to your board project's root folder:
+1. Once the automated library CI check passes, merge the PR into `master`.
+2. Boards pick the change up through a reviewable update pull request. Run the local equivalent from the board repository root, where the board's copy of the platform tools lives:
    ```bash
-   cd ../..
+   python .pcb-devops-cache/scripts/rov.py board sync-library
    ```
-4. Update the submodule reference in your board repo to pull in the newly merged part:
+   It is a dry run: it prints the current commit, the target commit, and the changed library files without touching anything.
+3. To apply the plan, review the printed change, then run:
    ```bash
-   git submodule update --remote --merge
+   python .pcb-devops-cache/scripts/rov.py board sync-library --apply --branch chore/library-update --push --pr
    ```
-5. Commit and push the updated submodule pointer in your board repository:
-   ```bash
-   git add libs/purdue-rov-kicad-lib
-   git commit -m "chore(submodule): update central library to latest master"
-   git push origin [your-board-branch]
-   ```
+   It requires a clean board worktree and a clean submodule. A dirty worktree or a diverged remote is reported as `BLOCKED`, not forced through.
+4. Merge the resulting `chore/library-update` pull request in your board repository. The scheduled workflow in your board does this for you, and no command ever pushes your working branch directly.
+
+   Note the two command families are not interchangeable. `rov library sync`
+   updates this library repository and is meant to be run from the library root.
+   `rov board sync-library` updates a board's submodule pointer and is meant to
+   be run from the board root. Running the **bare** form of `library sync` from
+   a board root would resolve the library to the board itself and try to
+   fast-forward the board's own branch; the explicit form
+   `library sync --library-dir libs/purdue-rov-kicad-lib` is safe from a board
+   root because it names the library unambiguously.
 
 ---
 
