@@ -25,7 +25,6 @@ if not ensure_dependencies({"tkinter": None}, prompt_if_missing=True):
 import re
 import zipfile
 import shutil
-import subprocess
 import threading
 import time
 import tempfile
