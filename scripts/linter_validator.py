@@ -12,7 +12,7 @@ if sys.platform == "win32":
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 # Mandatory fields that must be present in every component symbol
-MANDATORY_FIELDS = {"MPN", "Manufacturer", "Datasheet", "Temp_Range", "DigiKey", "Category"}
+MANDATORY_FIELDS = {"MPN", "Manufacturer", "Datasheet", "Temp_Range", "Category"}
 
 from kicad_sym_utils import CATEGORIES as _CATEGORIES
 

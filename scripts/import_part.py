@@ -14,8 +14,11 @@ Usage (CLI Arguments):
       --mpn "TPS62130" \
       --mfr "Texas Instruments" \
       --datasheet "https://www.ti.com/lit/ds/symlink/tps62130.pdf" \
-      --digikey "296-30230-1-ND" \
       --temp "-40°C to 125°C"
+
+    --digikey is optional. It is one distributor's SKU, not a required field, and
+    the import succeeds without it. Add it as the last argument when you have one:
+      --digikey "296-30230-1-ND"
 """
 
 import sys
@@ -53,7 +56,7 @@ import rov_bridge
 BASE_DIR = Path(__file__).resolve().parent.parent
 SYMBOLS_DIR = BASE_DIR / "Symbols"
 FOOTPRINTS_DIR = BASE_DIR / "Footprints"
-MANDATORY_FIELDS = ["MPN", "Manufacturer", "Datasheet", "Temp_Range", "DigiKey", "Category"]
+MANDATORY_FIELDS = ["MPN", "Manufacturer", "Datasheet", "Temp_Range", "Category"]
 
 def run_shared_validation():
     """Validate the library through the shared CLI and return code and output.

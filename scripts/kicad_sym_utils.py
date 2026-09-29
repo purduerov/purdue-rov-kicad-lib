@@ -611,7 +611,7 @@ def validate_component_rules(fields_dict):
     warnings = []
 
     # 1. Mandatory Fields Check
-    mandatory = ["Category", "MPN", "Manufacturer", "DigiKey", "Datasheet", "Temp_Range"]
+    mandatory = ["Category", "MPN", "Manufacturer", "Datasheet", "Temp_Range"]
     for f in mandatory:
         val = str(fields_dict.get(f, "")).strip()
         if not val:

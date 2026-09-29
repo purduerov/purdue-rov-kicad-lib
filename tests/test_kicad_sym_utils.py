@@ -286,8 +286,9 @@ class TestKiCadSymUtils(unittest.TestCase):
         self.assertTrue(any("identical to MPN" in e for e in errors))
         self.assertTrue(any("Invalid Category" in e for e in errors))
         self.assertTrue(any("PDF document" in e for e in errors))
-        self.assertTrue(any("Missing mandatory field: 'DigiKey'" in e for e in errors))
         self.assertTrue(any("Missing mandatory field: 'Temp_Range'" in e for e in errors))
+        # DigiKey is optional: an empty value must not be reported as missing.
+        self.assertFalse([e for e in errors if "Missing mandatory field: 'DigiKey'" in e])
 
     def test_smart_autofill_mfr_and_digikey_swap(self):
         raw_sym = """(symbol "497-STM32C542CCT6-ND"

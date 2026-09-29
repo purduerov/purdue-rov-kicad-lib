@@ -194,7 +194,7 @@ CATEGORY_FILES = {
     "Mech": "rov_mech"
 }
 
-MANDATORY_FIELDS = ["Category", "MPN", "Manufacturer", "DigiKey", "Datasheet", "Temp_Range"]
+MANDATORY_FIELDS = ["Category", "MPN", "Manufacturer", "Datasheet", "Temp_Range"]
 
 
 class LibraryParser:
@@ -388,7 +388,7 @@ class ImportPartDialog:
             ("MPN", "Manufacturer Part Number *"),
             ("Manufacturer", "Manufacturer Name *"),
             ("Datasheet", "Datasheet PDF URL *"),
-            ("DigiKey", "DigiKey SKU / Link *"),
+            ("DigiKey", "DigiKey SKU / Link"),
             ("Temp_Range", "Temperature Range (e.g. -40°C to 125°C) *"),
             ("Footprint", "Assigned Footprint (e.g. rov_power:QFN-16)"),
             ("Description", "Description / Value")
@@ -1114,7 +1114,7 @@ class LibraryManagerApp:
             ("Category", "Category (Move category)"),
             ("MPN", "Manufacturer Part Number *"),
             ("Manufacturer", "Manufacturer Name *"),
-            ("DigiKey", "DigiKey SKU / Link *"),
+            ("DigiKey", "DigiKey SKU / Link"),
             ("Datasheet", "Datasheet PDF URL *"),
             ("Temp_Range", "Temperature Range (e.g. -40°C to 125°C) *"),
             ("Footprint", "Assigned Footprint"),

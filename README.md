@@ -44,9 +44,12 @@ Every symbol must include these fields to pass linting:
 | `Category` | One of: `Passives`, `Power`, `Logic`, `Connectors`, `Sensors`, `Mech` | `Power` |
 | `MPN` | Exact Manufacturer Part Number | `TPS54302DDCR` |
 | `Manufacturer` | Manufacturer name | `Texas Instruments` |
-| `DigiKey` | DigiKey part number or SKU | `296-48767-1-ND` |
 | `Datasheet` | Direct PDF URL (`http://` or `https://`) | `https://www.ti.com/lit/ds/symlink/tps54302.pdf` |
 | `Temp_Range` | Operating temperature range | `-40°C to 125°C` |
+
+`DigiKey` is optional. A DigiKey part number is one distributor's internal SKU, and a part is
+not required to be stocked there, so it is not part of the required set. Symbols that carry a
+`DigiKey` part number or SKU (for example `296-48767-1-ND`) keep it.
 
 ## Managing & Adding Components (GUI)
 

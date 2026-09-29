@@ -189,13 +189,16 @@ Follow these instructions exactly to create a new symbol, footprint, and 3D mode
    ```
    rov_<category>:[exact_footprint_name_you_saved]
    ```
-5. Add the **6 mandatory fields** as custom fields:
+5. Add the **5 mandatory fields** as custom fields:
    *   `Category`: Must be one of `Passives`, `Power`, `Logic`, `Connectors`, `Sensors`, `Mech`. Click the `+` button in Symbol Properties to add a new custom field.
    *   `MPN`: The Manufacturer Part Number (exact matching).
    *   `Manufacturer`: The manufacturer name.
-   *   `DigiKey`: The DigiKey Part Number/SKU (if none exists, use `N/A`).
    *   `Datasheet`: The direct link to the datasheet PDF (must start with `http://` or `https://` and end with `.pdf`).
    *   `Temp_Range`: The operating temperature range (e.g., `-40°C to 125°C`).
+
+   `DigiKey` is optional. A DigiKey part number is one distributor's internal SKU, and a part is
+   not required to be stocked there, so it is not part of the required set. Add the
+   `DigiKey` Part Number/SKU field when you have one; existing symbols keep theirs.
 6. Save the symbol inside the chosen library.
 
 ### Step 5: Verify Locally
@@ -294,7 +297,7 @@ If you downloaded a symbol from Ultra Librarian, SnapEDA, or SamacSys, it will c
     *   Right-click the chosen library and click **Paste Symbol**.
 4.  **Enrich Properties**:
     *   Double-click the pasted symbol to open its properties.
-    *   Populate the **6 mandatory fields** (`Category`, `MPN`, `Manufacturer`, `DigiKey`, `Datasheet`, `Temp_Range`) and make sure the **Footprint** field points to `rov_<category>:[footprint_name]`. Click the `+` button to add any missing fields.
+    *   Populate the **5 mandatory fields** (`Category`, `MPN`, `Manufacturer`, `Datasheet`, `Temp_Range`) and make sure the **Footprint** field points to `rov_<category>:[footprint_name]`. Click the `+` button to add any missing fields.
     *   Click **Save**.
 5.  **Remove the Temporary Library**:
     *   Go back to **Preferences ➔ Manage Symbol Libraries** and remove the `temp_download` entry so your catalog stays clean.
@@ -305,7 +308,7 @@ Because KiCad symbols are stored as nested text blocks inside a single file, you
 2.  Locate the symbol block starting with `(symbol "PART_NAME" ...)` and select the entire block (including all its contents and matching closing parentheses). **Copy it**.
 3.  Open the appropriate categorized `Symbols/rov_*.kicad_sym` file in your text editor.
 4.  Scroll to the very bottom of the file. Right before the final closing parenthesis `)` of the library, paste your copied symbol block.
-5.  Open KiCad's **Symbol Editor**, load the library, verify the symbol loads correctly, add the 6 mandatory fields, and click **Save**.
+5.  Open KiCad's **Symbol Editor**, load the library, verify the symbol loads correctly, add the 5 mandatory fields, and click **Save**.
 
 ---
 
