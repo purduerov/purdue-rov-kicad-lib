@@ -393,6 +393,8 @@ class TestSharedValidation(unittest.TestCase):
             import_part.rov_bridge, "run_rov", fake_validate
         ), patch.object(
             import_part, "append_symbol_to_category", lambda *a, **k: None
+        ), patch.object(
+            import_part, "write_part_source_file", lambda *a, **k: None
         ):
             with redirect_stdout(buffer):
                 import_part.interactive_mode()
@@ -414,6 +416,128 @@ class TestSharedValidation(unittest.TestCase):
 
         self.assertEqual(1, ctx.exception.code)
         self.assertIn("checked", buffer.getvalue())
+
+
+class TestPerPartSourceFile(unittest.TestCase):
+    """A CLI import must survive a rebuild of the aggregate category file.
+
+    ``Symbols/rov_<category>.kicad_sym`` is derived output: ``build_symbol_libs.py``
+    compiles ``Symbols/parts/<category>/*.kicad_sym`` and overwrites it. An import
+    that only appends to the aggregate therefore loses the part on the next build,
+    so the CLI has to write the per-part source file the build reads from.
+
+    Both entry points are covered. The argument-driven path is one of two: the
+    module docstring documents a bare ``python scripts/import_part.py`` as the
+    primary usage, and ``main()`` routes to the wizard whenever ``--symbol`` is
+    absent, so a wizard import that skipped the per-part write would still lose
+    the part.
+
+    The whole flow runs in a temp tree because the real ``import_part.py`` resolves
+    ``Symbols/`` from its own location; importing it in place would write into the
+    actual library, and a real build would rewrite all six aggregate files.
+    """
+
+    def test_imported_symbol_survives_rebuild(self):
+        """The argument-driven path writes the source file the build reads."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            lib, scripts, env = self._stage_library(tmpdir)
+            source = self._write_source_symbol(tmpdir, "REBUILDPROBE")
+            result = subprocess.run(
+                [sys.executable, str(scripts / "import_part.py"),
+                 "--symbol", str(source), "--category", "Power",
+                 "--mpn", "REBUILDPROBE", "--mfr", "Acme",
+                 "--datasheet", "https://example.com/p.pdf",
+                 "--temp", "-40C to 125C"],
+                capture_output=True, text=True, env=env, cwd=tmpdir,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self._assert_rebuild_keeps_part(lib, scripts, env, tmpdir, "REBUILDPROBE")
+
+    def test_wizard_import_survives_rebuild(self):
+        """The wizard writes the same source file, so a wizard import survives too.
+
+        The wizard reads every field with ``input()``, so the responses are piped
+        into stdin in exactly the order it prompts for them. ``Power`` is chosen
+        by its menu number rather than by pressing Enter, because the wizard's
+        default depends on what it infers from the source symbol. A prompt that
+        goes unanswered raises ``EOFError`` and surfaces in the assertion message,
+        so a reordering of the wizard is reported rather than silently absorbed.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            lib, scripts, env = self._stage_library(tmpdir)
+            source = self._write_source_symbol(tmpdir, "WIZARDPROBE")
+            answers = [
+                str(source),                # downloaded symbol file
+                "",                         # footprint: none
+                "",                         # 3D model: none
+                self._power_menu_choice(),   # component category
+                "WIZARDPROBE",              # MPN
+                "Acme",                     # manufacturer
+                "https://example.com/w.pdf",  # datasheet URL
+                "",                         # DigiKey part number: none
+                "",                         # temperature range: keep the default
+            ]
+            result = subprocess.run(
+                [sys.executable, str(scripts / "import_part.py")],
+                input="\n".join(answers) + "\n",
+                capture_output=True, text=True, env=env, cwd=tmpdir,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self._assert_rebuild_keeps_part(lib, scripts, env, tmpdir, "WIZARDPROBE")
+
+    def _assert_rebuild_keeps_part(self, lib, scripts, env, tmpdir, part_name):
+        """Assert the import left a per-part file that a rebuild compiles back in."""
+        per_part = lib / "Symbols" / "parts" / "power" / f"{part_name}.kicad_sym"
+        self.assertTrue(per_part.is_file(), "per-part source file was not written")
+
+        rebuild = subprocess.run(
+            [sys.executable, str(scripts / "build_symbol_libs.py")],
+            capture_output=True, text=True, env=env, cwd=tmpdir,
+        )
+        self.assertEqual(rebuild.returncode, 0, rebuild.stderr)
+        aggregate = (lib / "Symbols" / "rov_power.kicad_sym").read_text(encoding="utf-8")
+        self.assertIn(f'(symbol "{part_name}"', aggregate,
+                      "rebuild discarded the imported symbol")
+
+    def _stage_library(self, tmpdir):
+        """Copy the scripts into a throwaway library tree and return where to run them."""
+        lib = Path(tmpdir)
+        scripts = lib / "scripts"
+        scripts.mkdir()
+        (lib / "Symbols" / "parts").mkdir(parents=True)
+        for name in ("import_part", "kicad_sym_utils", "build_symbol_libs", "rov_bridge"):
+            shutil.copy2(BASE_DIR / "scripts" / f"{name}.py", scripts / f"{name}.py")
+        (lib / "Symbols" / "rov_power.kicad_sym").write_text(
+            '(kicad_symbol_lib (version 20211014)\n  (generator "kicad_symbol_editor")\n)\n',
+            encoding="utf-8",
+        )
+        # The importer validates through the shared DevOps CLI before it
+        # reports success. A stub keeps the subprocess self-contained: it
+        # resolves the bridge without reaching for a real checkout.
+        devops = lib / "DevOps"
+        (devops / "scripts").mkdir(parents=True)
+        (devops / "scripts" / "rov.py").write_text(
+            "import sys\nsys.exit(0)\n", encoding="utf-8"
+        )
+        env = dict(os.environ, PYTHONPATH=str(scripts), ROV_DEVOPS_DIR=str(devops))
+        return lib, scripts, env
+
+    def _power_menu_choice(self):
+        """Return the number the wizard's category menu prints for ``Power``."""
+        return str(import_part.ALLOWED_CATEGORIES.index("Power") + 1)
+
+    def _write_source_symbol(self, tmpdir, part_name):
+        """Write the throwaway downloaded symbol the import is driven with."""
+        path = Path(tmpdir) / f"{part_name}.kicad_sym"
+        path.write_text(
+            '(kicad_symbol_lib (version 20211014)\n'
+            f'  (symbol "{part_name}" (in_bom yes) (on_board yes)\n'
+            '    (property "Reference" "U" (id 0) (at 0 0 0))\n'
+            '  )\n'
+            ')\n',
+            encoding="utf-8",
+        )
+        return path
 
 
 if __name__ == "__main__":

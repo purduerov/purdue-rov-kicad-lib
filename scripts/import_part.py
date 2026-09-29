@@ -56,6 +56,7 @@ import rov_bridge
 BASE_DIR = Path(__file__).resolve().parent.parent
 SYMBOLS_DIR = BASE_DIR / "Symbols"
 FOOTPRINTS_DIR = BASE_DIR / "Footprints"
+PARTS_DIR = SYMBOLS_DIR / "parts"
 MANDATORY_FIELDS = ["MPN", "Manufacturer", "Datasheet", "Temp_Range", "Category"]
 
 def run_shared_validation():
@@ -157,6 +158,28 @@ def copy_footprint_to_category(cat, fp_filepath):
     print(f"[OK] Copied footprint to: {dest_path}")
     return Path(fp_filepath).stem
 
+def write_part_source_file(cat, sym_block):
+    """Write the per-part source file that build_symbol_libs.py compiles from.
+
+    The aggregate category file is derived output. Appending to it alone
+    loses the part on the next build, so every import also writes the
+    per-part file under Symbols/parts/<category>/.
+    """
+    match = re.search(r'\(\s*symbol\s+"([^"]+)"', sym_block)
+    sym_name = match.group(1) if match else "NEW_PART"
+    safe_name = re.sub(r'[^a-zA-Z0-9_\-\.\+]', '_', sym_name)
+    cat_folder = PARTS_DIR / cat.lower()
+    cat_folder.mkdir(parents=True, exist_ok=True)
+    part_file = cat_folder / f"{safe_name}.kicad_sym"
+    part_content = (
+        '(kicad_symbol_lib (version 20211014) (generator "kicad_symbol_editor")\n'
+        f'  {sym_block.strip()}\n'
+        ')\n'
+    )
+    part_file.write_text(part_content, encoding="utf-8")
+    print(f"[OK] Wrote per-part source to: {part_file}")
+    return part_file
+
 def interactive_mode():
     print("=" * 60)
     print("  Purdue ROV KiCad Library - Part Import Wizard")
@@ -257,6 +280,7 @@ def interactive_mode():
             sym_block = rename_symbol(sym_block, mpn)
         updated_sym = inject_or_update_properties(sym_block, field_updates)
 
+    write_part_source_file(category, updated_sym)
     append_symbol_to_category(category, updated_sym)
     
     print("\n[INFO] Running Linter Verification...")
@@ -321,6 +345,7 @@ def main():
         sym_block = rename_symbol(sym_block, target_mpn)
 
     updated_sym = inject_or_update_properties(sym_block, field_updates)
+    write_part_source_file(category, updated_sym)
     append_symbol_to_category(category, updated_sym)
     
     # Run linter
