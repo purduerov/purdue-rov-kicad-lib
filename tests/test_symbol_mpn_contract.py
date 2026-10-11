@@ -17,6 +17,10 @@ def _sanitize(name):
 # Parts whose symbol name cannot equal the sanitized MPN yet. Each entry must
 # name the blocker; exceptions are temporary, not a second naming scheme.
 KNOWN_EXCEPTIONS = {
+    # X19-USB-Hub-Board references rov_logic:UPD720201K8-7x1-BAC-A. Renaming
+    # the symbol to the DigiKey MPN (...-711-...) breaks that board, so the
+    # rename waits for a board-side migration.
+    "UPD720201K8-7x1-BAC-A.kicad_sym": "kept for X19-USB-Hub-Board compatibility",
 }
 
 
