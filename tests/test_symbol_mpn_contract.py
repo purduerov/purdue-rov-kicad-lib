@@ -17,10 +17,6 @@ def _sanitize(name):
 # Parts whose symbol name cannot equal the sanitized MPN yet. Each entry must
 # name the blocker; exceptions are temporary, not a second naming scheme.
 KNOWN_EXCEPTIONS = {
-    # Symbol says TCAN1044AVDRQ1 while MPN/Value/DigiKey say TCAN1044D:
-    # different TI variants. Pin-level resolution against the datasheet is
-    # still open.
-    "TCAN1044.kicad_sym": "D-vs-AV variant conflict, unresolved",
 }
 
 
