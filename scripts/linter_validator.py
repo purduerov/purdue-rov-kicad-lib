@@ -102,6 +102,62 @@ def _direct_properties(block):
         index += 1
     return props
 
+def check_footprint_refs(filepath, footprints_dir):
+    """Report ``rov_<category>:<name>`` footprint refs with no .kicad_mod file.
+
+    Only ``rov_``-prefixed references are checked: stock KiCad libraries are
+    not part of this checkout and cannot be verified here. An empty Footprint
+    property is skipped. A missing ``footprints_dir`` means there is nothing
+    to check against, so no errors are reported.
+    """
+    errors = []
+
+    if not os.path.isdir(footprints_dir):
+        return errors
+
+    if not os.path.exists(filepath):
+        return [f"File not found: {filepath}"]
+
+    with open(filepath, 'r', encoding='utf-8') as f:
+        text = f.read()
+
+    for symbol_name, block in _top_level_symbols(text):
+        footprint = _direct_properties(block).get("Footprint", "").strip()
+        if not footprint or ":" not in footprint:
+            continue
+        lib, name = footprint.split(":", 1)
+        if not lib.startswith("rov_") or not name.strip():
+            continue
+        mod_path = os.path.join(footprints_dir, f"{lib}.pretty", f"{name}.kicad_mod")
+        if not os.path.isfile(mod_path):
+            errors.append(
+                f"Symbol '{symbol_name}' references missing footprint '{footprint}'"
+            )
+
+    return errors
+
+
+def _footprints_for(symbols_path):
+    """Return the Footprints dir belonging to a Symbols file or dir, if any.
+
+    Walks up from ``symbols_path`` looking for a directory named ``Symbols``;
+    its sibling ``Footprints`` is the library's footprint tree. Returns None
+    when no such layout exists, in which case footprint refs are not checked.
+    """
+    current = os.path.abspath(symbols_path)
+    if not os.path.isdir(current):
+        current = os.path.dirname(current)
+    for _ in range(5):
+        if os.path.basename(current) == "Symbols":
+            candidate = os.path.join(os.path.dirname(current), "Footprints")
+            return candidate if os.path.isdir(candidate) else None
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    return None
+
+
 def check_kicad_symbol_file(filepath):
     errors = []
     
@@ -176,6 +232,9 @@ if __name__ == "__main__":
     for symbols_file in symbol_files:
         print(f"Linting KiCad symbol file: {symbols_file}")
         all_errors.extend(check_kicad_symbol_file(symbols_file))
+        footprints_dir = _footprints_for(symbols_file)
+        if footprints_dir is not None:
+            all_errors.extend(check_footprint_refs(symbols_file, footprints_dir))
         
     if all_errors:
         print("\n[ERROR] Linter Verification Failed:", file=sys.stderr)
