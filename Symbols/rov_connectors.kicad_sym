@@ -1,5 +1,5 @@
 (kicad_symbol_lib (version 20211014) (generator kicad_symbol_editor)
-  (symbol "525591652"
+  (symbol "52559-1652"
 		(body_styles demorgan)
 		(pin_names
 			(offset 0.254)
@@ -104,7 +104,7 @@
     (property "Verified" "Yes" (id 15) (at 0 0 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-		(symbol "525591652_1_1"
+		(symbol "52559-1652_1_1"
 			(rectangle
 				(start 0 0)
 				(end 7.62 -43.18)
@@ -405,7 +405,7 @@
 				)
 			)
 		)
-		(symbol "525591652_1_2"
+		(symbol "52559-1652_1_2"
 			(polyline
 				(pts
 					(xy 5.08 2.54) (xy 5.08 -40.64)

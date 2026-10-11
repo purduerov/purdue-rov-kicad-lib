@@ -35,6 +35,11 @@ purdue-rov-kicad-lib/
 Per-part source files are canonical. The six category libraries are generated,
 validated, and committed, so existing KiCad library tables keep working.
 
+Empty category libraries (today: `rov_mech` symbols, `rov_parts.pretty`)
+are intentional placeholders, not dead weight: every board's `fp-lib-table`
+and `sym-lib-table` references all six categories, so deleting one breaks
+board loading. Leave them in place until a part needs them.
+
 ## Required Symbol Fields
 
 Every symbol must include these fields to pass linting:
@@ -50,6 +55,17 @@ Every symbol must include these fields to pass linting:
 `DigiKey` is optional. A DigiKey part number is one distributor's internal SKU, and a part is
 not required to be stocked there, so it is not part of the required set. Symbols that carry a
 `DigiKey` part number or SKU (for example `296-48767-1-ND`) keep it.
+
+## Stock KiCad Symbols vs Standard Library
+
+Generic symbols stay in KiCad's stock libraries and are never copied here:
+passives (`Device:R`, `Device:C`, `Device:L`), generic diodes (`Device:D`,
+`Device:D_Zener`), transistors, generic connectors
+(`Connector_Generic:Conn_*`, `Connector:TestPoint`), power symbols, and
+mechanical symbols. A part enters this library only with a real MPN, a
+matching footprint under `Footprints/`, and the mandatory fields above. The
+linter enforces the fields and the footprint link, so anything generic or
+footprint-less stays on the board by design.
 
 ## Managing & Adding Components (GUI)
 

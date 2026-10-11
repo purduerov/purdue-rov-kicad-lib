@@ -1059,7 +1059,7 @@
       )
     )
   )
-  (symbol "UPD720201K8-7x1-BAC-A"
+  (symbol "UPD720201K8-711-BAC-A"
 		(pin_names
 			(offset 0.254)
 		)
@@ -1163,7 +1163,7 @@
     (property "Verified" "Yes" (id 15) (at 0 0 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-		(symbol "UPD720201K8-7x1-BAC-A_0_1"
+		(symbol "UPD720201K8-711-BAC-A_0_1"
 			(pin output line
 				(at -45.72 -39.37 0)
 				(length 7.62)
@@ -2389,7 +2389,7 @@
 				)
 			)
 		)
-		(symbol "UPD720201K8-7x1-BAC-A_1_1"
+		(symbol "UPD720201K8-711-BAC-A_1_1"
 			(rectangle
 				(start -38.1 45.72)
 				(end 36.83 -48.26)
