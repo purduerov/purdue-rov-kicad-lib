@@ -1,9 +1,9 @@
 (kicad_symbol_lib (version 20211014) (generator kicad_symbol_editor)
-  (symbol "TCAN1044AVDRQ1" (pin_names (offset 0.254)) (in_bom yes) (on_board yes)
+  (symbol "TCAN1044AEVDRQ1" (pin_names (offset 0.254)) (in_bom yes) (on_board yes)
     (property "Reference" "U" (id 0) (at 0 2.54 0)
       (effects (font (size 1.524 1.524)))
     )
-    (property "Value" "TCAN1044AVDRQ1" (id 1) (at 0 0 0)
+    (property "Value" "TCAN1044AEVDRQ1" (id 1) (at 0 0 0)
       (effects (font (size 1.524 1.524)))
     )
     (property "Footprint" "rov_logic:D0008A-IPC_A" (id 2) (at 0 0 0)
@@ -12,7 +12,7 @@
     (property "Datasheet" "https://www.ti.com/lit/ds/symlink/tcan1044-q1.pdf" (id 3) (at 0 0 0)
       (effects (font (size 1.27 1.27) italic) hide)
     )
-    (property "ki_keywords" "TCAN1044AVDRQ1" (id 4) (at 0 0 0)
+    (property "ki_keywords" "TCAN1044AEVDRQ1" (id 4) (at 0 0 0)
       (effects (font (size 1.27 1.27)) hide)
     )
     (property "ki_locked" "" (id 5) (at 0 0 0)
@@ -27,10 +27,10 @@
     (property "Manufacturer" "Texas Instruments" (id 8) (at 0 0 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "MPN" "TCAN1044AVDRQ1" (id 9) (at 0 0 0)
+    (property "MPN" "TCAN1044AEVDRQ1" (id 9) (at 0 0 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "DigiKey" "https://www.digikey.com/en/products?keywords=TCAN1044AVDRQ1" (id 10) (at 0 0 0)
+    (property "DigiKey" "296-TCAN1044AEVDRQ1CT-ND" (id 10) (at 0 0 0)
       (effects (font (size 1.27 1.27)) hide)
     )
     (property "Temp_Range" "-40°C to 150°C" (id 11) (at 0 0 0)
@@ -42,7 +42,7 @@
     (property "Verified" "Yes" (id 13) (at 0 0 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (symbol "TCAN1044AVDRQ1_0_1"
+    (symbol "TCAN1044AEVDRQ1_0_1"
       (polyline
         (pts
           (xy 5.08 -22.86)
