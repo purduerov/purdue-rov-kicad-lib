@@ -243,7 +243,6 @@ class TestLibraryCiContract(unittest.TestCase):
             "ROV_DEVOPS_DIR",
             ".pcb-devops-cache",
             "../DevOps",
-            "../pcb-devops",
             "board root",
         ):
             with self.subTest(candidate=candidate):

@@ -192,7 +192,7 @@ def generate_sample_test_component(part_name: str = "TEST_TPS54302_BUCK", catego
     (property "Value" "{part_name}" (id 1) (at -5.08 -10.16 0)
       (effects (font (size 1.27 1.27)) (justify bottom left))
     )
-    (property "Footprint" "rov_power:SOT-23-6" (id 2) (at 0 0 0)
+    (property "Footprint" "rov_power:SOT-23-5_MC_MCH" (id 2) (at 0 0 0)
       (effects (font (size 1.27 1.27)) hide)
     )
     (property "Datasheet" "https://www.ti.com/lit/ds/symlink/tps54302.pdf" (id 3) (at 0 0 0)
@@ -259,7 +259,7 @@ def generate_sample_test_component(part_name: str = "TEST_TPS54302_BUCK", catego
         "properties": {
             "Reference": "U",
             "Value": part_name,
-            "Footprint": "rov_power:SOT-23-6",
+            "Footprint": "rov_power:SOT-23-5_MC_MCH",
             "Datasheet": "https://www.ti.com/lit/ds/symlink/tps54302.pdf",
             "Description": "4.5V to 28V Input, 3A Step-Down Converter",
             "Manufacturer": "Texas Instruments",
