@@ -34,6 +34,22 @@ CATEGORY_FILES = {
 }
 
 
+def _target_has_symbols(target_file):
+    """Return True when a compiled category library already holds symbols.
+
+    The compiler derives category libraries from per-part sources, so an
+    empty source folder must never silently overwrite a non-empty library:
+    that is how whole categories were lost in the past.
+    """
+    if not target_file.exists():
+        return False
+    try:
+        content = target_file.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return False
+    return bool(extract_top_symbols(content))
+
+
 def build_all_categories():
     """
     Scans Symbols/parts/<category>/ for all *.kicad_sym files, validates them,
@@ -66,6 +82,13 @@ def build_all_categories():
         # Build monolithic category library
         header = '(kicad_symbol_lib (version 20211014) (generator kicad_symbol_editor)\n'
         if not symbols_found:
+            if _target_has_symbols(target_file):
+                raise ValueError(
+                    f"Refusing to empty {target_file.name}: {cat_folder} holds no "
+                    f"part sources but the compiled library still has symbols. "
+                    f"Restore the part sources, or delete {target_file.name} "
+                    f"explicitly to retire the category."
+                )
             compiled_content = header + ")\n"
         else:
             # Sort symbols alphabetically by name for deterministic builds
