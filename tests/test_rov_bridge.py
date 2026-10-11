@@ -84,7 +84,6 @@ class TestDevOpsResolutionOrder(unittest.TestCase):
             [
                 library / ".pcb-devops-cache",
                 library.parent / "DevOps",
-                library.parent / "pcb-devops",
                 rov_bridge.board_cache_dir(library),
             ],
             "without an explicit override the board-root cache is searched last",

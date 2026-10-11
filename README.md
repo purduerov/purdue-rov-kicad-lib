@@ -109,7 +109,8 @@ checkout in this order, and the first candidate that really contains
 1. the `ROV_DEVOPS_DIR` environment variable, which always wins;
 2. `.pcb-devops-cache/` inside the library directory;
 3. a sibling `../DevOps`, the multi-repository workspace layout;
-4. a sibling `../pcb-devops`, the older single-repository sibling name.
+4. the board-root cache two levels above the library, where a board's
+   `LAUNCH_KICAD` puts its cache.
 
 `ROV_DEVOPS_DIR` is the only setting that works in every layout, so set it if the
 others do not resolve. Note one known gap: when this library is a board
