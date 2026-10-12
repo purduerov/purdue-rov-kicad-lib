@@ -39,7 +39,7 @@
   (pad 11 thru_hole circle (at 53.340 5.62) (size 1.400 1.400) (drill 0.9) (layers *.Cu *.Mask))
   (pad 12 thru_hole circle (at 53.340 3.62) (size 1.400 1.400) (drill 0.9) (layers *.Cu *.Mask))
   (pad 13 thru_hole circle (at 53.340 1.62) (size 1.400 1.400) (drill 0.9) (layers *.Cu *.Mask))
-  (model E48SC12030NRFH.stp
+  (model "${KIPRJMOD}/libs/purdue-rov-kicad-lib/3D_Models/E48SC12030NRFH.stp"
     (at (xyz 0.99999998498151 -0.30078739631833 0.0094488186864402))
     (scale (xyz 1 1 1))
     (rotate (xyz 0 0 0))
